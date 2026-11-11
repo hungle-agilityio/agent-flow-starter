@@ -35,7 +35,7 @@ For every new request:
    - "Part of the epic #N" when the task belongs to an epic;
    - a link to the spec on `main` (full lane);
    - the labels `risk:low`, `risk:medium` or `risk:high`, plus `needs-ui` when users see a change;
-   - the labels printed by `python3 -I .flow/plugin/skills/create-issue/route_issue.py <body file>` (from the app folder), run on each issue body before it is posted. They come from its Files likely touched section:
+   - the labels printed by `python3 -I .flow/plugin/skills/create-issue/route_issue.py <body file>` (from the repository root), run on each issue body before it is posted. They come from its Files likely touched section:
      - `area:flow` for the workflow (`.flow/loop/`, `.claude/`, `.github/`, `docs/intent/`, `docs/specs/`, `scripts/`), `area:app` for the app and its hosting;
      - `agent:ready` always (ADR-023): the tick passes the listed files to the build and `before-edit-check` lets it edit exactly those, guarded ones included (`.claude/`, `.github/`, `.mcp.json`, the plugin, the gate files, an existing test under `src/<feature>/tests/`). A path outside the repository is not routed: fix the issue;
      - exception (ADR-023, "Exception: .claude/"): a task that changes a file under `.claude/` cannot be built by the loop (safetyCheck; `route_issue.py` warns). Split it out, give it no `agent:*` label, and build it by hand through the Mac mini (I click Merge);
@@ -43,7 +43,7 @@ For every new request:
    - new tests in a new test file named in the issue;
    - assignee hungle-agilityio.
    - before the issue is posted, search the tests (`.flow/loop/tests/`, `src/<feature>/tests/`, the plugin's tests) for assertions on the behaviour the issue changes. When there are any, the issue lists them under `## Existing tests that change` (one backticked `path::test_name` per bullet), an AC allows exactly those to change, and the issue never says "every existing test passes unchanged". An existing test means a test on `main`: a test added by an earlier task of the same epic is not one, needs no listing, and the epic pull request shows any change to it (ADR-022). The issue stays `agent:ready`: the build may edit exactly the listed tests.
-   - before an issue gets `agent:ready`, run `uv run python .flow/loop/pinned_tests.py --unlisted <body file>` (from the app folder) on its body and settle every hit: list the test under `## Existing tests that change` with old → new, or reword the AC so the test stays unchanged and say so in the AC. Run it again until it exits 0 (ADR-024).
+   - before an issue gets `agent:ready`, run `uv run python .flow/loop/pinned_tests.py --unlisted <body file>` (from the repository root) on its body and settle every hit: list the test under `## Existing tests that change` with old → new, or reword the AC so the test stays unchanged and say so in the AC. Run it again until it exits 0 (ADR-024).
 
    It also adds a comment titled `Decisions` with the table question / chosen / rejected / why, and a comment titled `Design` with the link, if any. No Requester, Type or Labels lines in the body, and no Claude attribution anywhere. At the end, print a table: task → issue → depends on. Your work ends at the issues.
 

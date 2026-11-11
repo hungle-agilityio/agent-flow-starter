@@ -3,7 +3,7 @@
 Spec: specs/flow-bootstrap/spec.md (AC2 to AC4), specs/project-layout/spec.md (AC1 to AC3).
 The file is `.flow/flow.toml` in a project with the new layout, else `ops/flow.toml`. Shell
 scripts call `python3 <loop folder>/flow_config.py <section.key>`. Standard library only; the
-only defaults are those of the optional `[paths]` table, which are Agent flow starter's layout.
+only defaults are those of the optional `[paths]` table, which are this repository's layout.
 """
 
 from __future__ import annotations
@@ -81,18 +81,18 @@ SCHEMA: dict[str, dict[str, str]] = {
 }
 # A file written before the plugin existed has no [plugin] table; the tick stops on the empty key.
 OPTIONAL_SECTIONS = {"plugin", "paths"}
-# A missing key of [paths] takes Agent flow starter's layout, so its ops/flow.toml needs no [paths].
+# A missing key of [paths] takes this repository's layout.
 PATH_DEFAULTS: dict[str, str | list[str]] = {
-    "loop_dir": "ops",
-    "plugin_dir": "../plugins/agent-flow",
-    "intent_file": "specs/{feature}/intent.md",
-    "specs_dir": "specs",
-    "spec_pr_dirs": ["specs", "design"],
-    "plans_dir": "",
-    "decisions_dir": ".claude/knowledge/decisions",
-    "templates_dir": "docs/app/templates",
-    "code_dirs": ["reviews", "starter"],
-    "flow_dirs": ["ops/", ".claude/", ".github/", "specs/", "docs/learning/"],
+    "loop_dir": ".flow/loop",
+    "plugin_dir": ".flow/plugin",
+    "intent_file": "docs/intent/{feature}.md",
+    "specs_dir": "docs/specs",
+    "spec_pr_dirs": ["docs/intent", "docs/specs"],
+    "plans_dir": "docs/plans",
+    "decisions_dir": "docs/decisions",
+    "templates_dir": "docs/templates",
+    "code_dirs": ["src"],
+    "flow_dirs": [".flow/", ".claude/", ".github/", "docs/intent/", "docs/specs/", "scripts/"],
 }
 
 
@@ -119,16 +119,18 @@ class FlowConfig:
     release_deploy_line: str
     plugin_id: str = ""
     plugin_marketplace: str = ""
-    paths_loop_dir: str = "ops"
-    paths_plugin_dir: str = "../plugins/agent-flow"
-    paths_intent_file: str = "specs/{feature}/intent.md"
-    paths_specs_dir: str = "specs"
-    paths_spec_pr_dirs: tuple[str, ...] = ("specs", "design")
-    paths_plans_dir: str = ""
-    paths_decisions_dir: str = ".claude/knowledge/decisions"
-    paths_templates_dir: str = "docs/app/templates"
-    paths_code_dirs: tuple[str, ...] = ("reviews", "starter")
-    paths_flow_dirs: tuple[str, ...] = ("ops/", ".claude/", ".github/", "specs/", "docs/learning/")
+    paths_loop_dir: str = ".flow/loop"
+    paths_plugin_dir: str = ".flow/plugin"
+    paths_intent_file: str = "docs/intent/{feature}.md"
+    paths_specs_dir: str = "docs/specs"
+    paths_spec_pr_dirs: tuple[str, ...] = ("docs/intent", "docs/specs")
+    paths_plans_dir: str = "docs/plans"
+    paths_decisions_dir: str = "docs/decisions"
+    paths_templates_dir: str = "docs/templates"
+    paths_code_dirs: tuple[str, ...] = ("src",)
+    paths_flow_dirs: tuple[str, ...] = (
+        ".flow/", ".claude/", ".github/", "docs/intent/", "docs/specs/", "scripts/"
+    )
 
 
 def _is_words(value: object) -> bool:
