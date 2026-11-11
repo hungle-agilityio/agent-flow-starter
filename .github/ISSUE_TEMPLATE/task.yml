@@ -1,0 +1,64 @@
+name: Task
+description: "Work with no new behaviour for users: cleanup, data, configuration, a document, an investigation"
+title: "[TASK] "
+labels: ["task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write in plain words. If users see a change it is a feature; if something is broken it is a bug.
+  - type: input
+    id: area
+    attributes:
+      label: Area
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: The work and the reason for it. Say which page, report, data or system it touches, or "nothing visible to users".
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      placeholder: |
+        - Included: ...
+        - Not included: ...
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: Each item must be something a person can check without technical help.
+      placeholder: |
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to check the result
+      description: Numbered user actions.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - dev
+        - staging
+        - production
+        - to confirm
+    validations:
+      required: true

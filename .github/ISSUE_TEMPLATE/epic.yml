@@ -1,0 +1,67 @@
+name: Epic
+description: One outcome that needs between 3 and 10 child issues
+title: "[EPIC] "
+labels: ["epic"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        An epic has one goal, between 3 and 10 children (one pull request each), and a log of scope changes.
+        Add each child as a sub-issue after it is created.
+  - type: input
+    id: area
+    attributes:
+      label: Area
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: "One sentence: what is true when the epic is finished. Write an outcome, not a list of work."
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: The problem or the value in plain words.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      placeholder: |
+        - Included: ...
+        - Not included: ...
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: Success criteria
+      description: Each item must be something a person can check without technical help.
+      placeholder: |
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: children
+    attributes:
+      label: Child issues
+      description: Between 3 and 10, in the order they should be done.
+      placeholder: |
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Dependencies and risks
+      description: Item, dependency or risk, effect if it goes wrong, what we do about it, owner.
+  - type: textarea
+    id: questions
+    attributes:
+      label: Open questions
+      description: Question, proposal, owner, date decided.

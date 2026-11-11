@@ -1,0 +1,10 @@
+{
+  "setup_command": [
+    "npm",
+    "ci"
+  ],
+  "alone_words": [
+    "migrations/"
+  ],
+  "ci_setup": "      - uses: actions/setup-node@v4\n        with:\n          node-version: \"20\"\n      - name: Install the locked dependencies\n        run: npm ci\n"
+}

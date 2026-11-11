@@ -1,0 +1,69 @@
+name: New feature
+description: Users get a new ability, or an existing page changes what users see
+title: "[FEAT] "
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write in plain words for QA, BA and clients. Mark anything not yet confirmed as (proposal).
+  - type: input
+    id: area
+    attributes:
+      label: Area
+      description: The page or part of the app, for example dashboard or reviews-list.
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Who needs what, and why. Say whether it changes an existing page (name and address) or is a completely new page.
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      description: Each one is "When <situation>, the screen must <result>", including the empty case.
+      placeholder: |
+        - When ..., the screen must ...
+        - When there is nothing to show, the screen must ...
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What exists today
+      description: Numbered steps to see the current page and what is missing.
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: How to check it when built
+      description: Numbered user actions, with the real names and numbers if specific data must exist.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - dev
+        - staging
+        - production
+        - to confirm
+    validations:
+      required: true
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Attachments
+      description: Sketch, mockup, example, or what is still to be added.

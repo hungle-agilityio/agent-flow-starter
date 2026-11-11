@@ -1,0 +1,11 @@
+{
+  "setup_command": [
+    "uv",
+    "sync",
+    "--frozen"
+  ],
+  "alone_words": [
+    "migrations/"
+  ],
+  "ci_setup": "      - name: Install uv\n        run: pip install uv\n      - name: Install the locked dependencies\n        run: uv sync --frozen\n"
+}

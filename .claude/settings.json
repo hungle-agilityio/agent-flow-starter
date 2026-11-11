@@ -1,0 +1,124 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run ruff:*)",
+      "Bash(uv run mypy:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(gh issue create:*)",
+      "Bash(gh issue edit:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh label create:*)",
+      "Bash(gh label list:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh auth status:*)",
+      "Bash(uv run coverage:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git switch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr comment:*)",
+      "Artifact",
+      "Bash(gh pr edit:*)",
+      "Edit(./src/**)",
+      "Edit(./out/**)",
+      "Edit(./.flow/loop/**)",
+      "Edit(./docs/intent/**)",
+      "Edit(./docs/specs/**)",
+      "Edit(./.gitignore)",
+      "Edit(./README.md)",
+      "Bash(git merge origin/main:*)",
+      "Bash(git merge --abort:*)",
+      "Bash(gh api -X POST repos/hungle-agilityio/agent-flow-starter/issues/comments/*/reactions *)",
+      "Bash(gh api -X POST repos/hungle-agilityio/agent-flow-starter/pulls/comments/*/reactions *)",
+      "Bash(gh api -X POST repos/hungle-agilityio/agent-flow-starter/pulls/*/comments/*/replies *)",
+      "Bash(gh api graphql *)",
+      "Bash(gh run view:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh api repos/hungle-agilityio/agent-flow-starter/pulls/*/comments)",
+      "Bash(gh api repos/hungle-agilityio/agent-flow-starter/pulls/*/comments *)",
+      "Bash(gh api repos/hungle-agilityio/agent-flow-starter/issues/*/comments)",
+      "Bash(gh api repos/hungle-agilityio/agent-flow-starter/issues/*/comments *)",
+      "Read(~/.claude/plugins/cache/starter/agent-flow/**)",
+      "Bash(uv sync:*)",
+      "Bash(git mv:*)",
+      "Bash(git cherry-pick:*)"
+    ],
+    "ask": [
+      "Bash(gh issue close:*)",
+      "Bash(gh issue reopen:*)",
+      "Bash(git remote add:*)",
+      "Bash(git remote set-url:*)",
+      "Bash(git rebase:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Bash(gh issue delete:*)",
+      "Bash(gh repo create:*)",
+      "Bash(gh repo delete:*)",
+      "Bash(gh repo edit:*)",
+      "Bash(gh repo fork:*)",
+      "Bash(gh repo rename:*)",
+      "Bash(gh repo archive:*)",
+      "Bash(gh repo list:*)",
+      "Bash(gh repo clone:*)",
+      "Bash(gh auth login:*)",
+      "Bash(gh auth logout:*)",
+      "Bash(gh auth refresh:*)",
+      "Bash(gh auth token:*)",
+      "Bash(gh auth switch:*)",
+      "Bash(gh auth setup-git:*)",
+      "Bash(gh gist:*)",
+      "Bash(gh ssh-key:*)",
+      "Bash(gh gpg-key:*)",
+      "Bash(gh secret:*)",
+      "Bash(gh variable:*)",
+      "Bash(gh org:*)",
+      "Bash(gh codespace:*)",
+      "Bash(gh extension:*)",
+      "Bash(gh search:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git commit --no-verify:*)",
+      "Bash(git push --no-verify:*)",
+      "Edit(./.git/**)",
+      "Bash(gh pr review:*)",
+      "Read(**/*DO-NOT-OPEN*)"
+    ],
+    "additionalDirectories": [
+      ".."
+    ]
+  },
+  "includeCoAuthoredBy": false,
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "env": {
+    "GH_REPO": "hungle-agilityio/agent-flow-starter"
+  },
+  "extraKnownMarketplaces": {
+    "starter": {
+      "source": {
+        "source": "github",
+        "repo": "hungle-agilityio/agent-flow-starter"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "agent-flow@starter": true
+  }
+}
