@@ -152,7 +152,7 @@ def real_run(args: list[str], cwd: Path) -> tuple[int, str]:
     return done.returncode, done.stdout
 
 
-PLUGIN_DIRS = {"plugins", ".claude-plugin"}
+PLUGIN_DIRS = {"plugins", ".claude-plugin", ".flow"}
 
 
 def git_root(path: Path, run: Runner) -> Path | None:
@@ -165,7 +165,7 @@ def git_root(path: Path, run: Runner) -> Path | None:
 
 
 def in_plugin_source(path: Path, run: Runner) -> bool:
-    """plugins/ and .claude-plugin/ at the git root hold the flow plugin and its marketplace."""
+    """plugins/, .claude-plugin/ and .flow/ at the git root hold the flow, its plugin and marketplace."""
     root = git_root(path, run)
     if root is None:
         return False

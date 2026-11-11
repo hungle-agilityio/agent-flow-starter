@@ -15,13 +15,6 @@ One file per decision: `ADR-001-short-title.md`, numbered in order. Write one fo
 
 ## Index
 
-- [ADR-001: Naming standard](ADR-001-naming-standard.md)
-- [ADR-002: GitHub is the only code host and tracker](ADR-002-github-only.md)
-- [ADR-003: Repository layout and issue files](ADR-003-repository-layout.md)
-- [ADR-004: Claude may reach only one GitHub repository](ADR-004-one-repository-only.md)
-- [ADR-005: Dependencies are locked with uv](ADR-005-dependencies-locked-with-uv.md)
-- [ADR-006: Project configuration lives in the lab folder](ADR-006-project-config-in-lab-folder.md)
-- [ADR-007: Review search uses a stored normalised copy of the text](ADR-007-search-uses-a-stored-normalised-text.md)
 - [ADR-008: An unattended loop works GitHub issues and reports once](ADR-008-unattended-loop-from-github-issues.md)
 - [ADR-009: The loop opens pull requests; the owner merges](ADR-009-loop-opens-pull-requests-owner-merges.md)
 - [ADR-010: A Claude Code Project is the main thread](ADR-010-claude-code-project-as-main-thread.md)
@@ -37,6 +30,6 @@ One file per decision: `ADR-001-short-title.md`, numbered in order. Write one fo
 - [ADR-020: The flow is a Claude Code plugin, agent-flow](ADR-020-flow-as-a-plugin.md)
 - [ADR-021: One shared branch per epic](ADR-021-epic-branch.md)
 - [ADR-022: An epic is reviewed once](ADR-022-epic-reviewed-once.md)
-- [ADR-023: No agent:manual; a loop build edits the files its issue lists](ADR-023-no-manual-label.md)
+- [ADR-023: A loop build edits exactly the files its issue lists](ADR-023-no-manual-label.md)
 - [ADR-024: A loop build fixes technical stops itself](ADR-024-loop-self-fix.md)
-- [ADR-025: A new project gets a stack-agnostic layout; the flow lives in .flow/](ADR-025-stack-agnostic-project-layout.md)
+- [ADR-025: A stack-agnostic layout; the flow lives in .flow/](ADR-025-stack-agnostic-project-layout.md)

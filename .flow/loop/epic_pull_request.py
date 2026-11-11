@@ -32,7 +32,7 @@ QUEUE_MARKER = "<!-- work-queue -->"
 SELF_FIX_MARKER = "<!-- self-fix -->"
 GUARD_DIRS = {".claude", ".github"}
 GUARD_NAMES = {".mcp.json"}
-PLUGIN_ROOTS = {"plugins", ".claude-plugin"}
+PLUGIN_ROOTS = {"plugins", ".claude-plugin", ".flow"}
 GATE_FILES = {  # the same list as before-edit-check of the agent-flow plugin
     "pyproject.toml", "uv.lock", "conftest.py", "ruff.toml", ".ruff.toml", "mypy.ini",
     ".mypy.ini", "setup.cfg", "pytest.ini", "tox.ini", ".coveragerc",
