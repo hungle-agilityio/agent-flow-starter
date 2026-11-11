@@ -1,0 +1,82 @@
+[
+  {
+    "name": "agent:ready",
+    "color": "0E8A16",
+    "description": "Decided and ready for the work-queue loop"
+  },
+  {
+    "name": "agent:running",
+    "color": "FBCA04",
+    "description": "The loop is building this issue"
+  },
+  {
+    "name": "agent:review",
+    "color": "1D76DB",
+    "description": "Pull request open, waiting for the owner's review"
+  },
+  {
+    "name": "agent:failed",
+    "color": "D93F0B",
+    "description": "The loop stopped; a human decides"
+  },
+  {
+    "name": "pr:ready-for-review",
+    "color": "0E8A16",
+    "description": "CI is green and the verify report passed; waiting for the owner"
+  },
+  {
+    "name": "pr:changes-requested",
+    "color": "FBCA04",
+    "description": "the owner asked for a change and the loop is working on it"
+  },
+  {
+    "name": "pr:blocked",
+    "color": "B60205",
+    "description": "the loop cannot go on without the owner; the reason is a comment on the pull request"
+  },
+  {
+    "name": "pr:ci-failed",
+    "color": "D93F0B",
+    "description": "CI is still red after the loop tried to fix it twice"
+  },
+  {
+    "name": "risk:low",
+    "color": "0E8A16",
+    "description": "Low risk task"
+  },
+  {
+    "name": "risk:medium",
+    "color": "FBCA04",
+    "description": "Medium risk task"
+  },
+  {
+    "name": "risk:high",
+    "color": "B60205",
+    "description": "High risk task: needs-info round, review on the MacBook"
+  },
+  {
+    "name": "needs-ui",
+    "color": "1D76DB",
+    "description": "Changes what users see"
+  },
+  {
+    "name": "area:flow",
+    "color": "5319E7",
+    "description": "The workflow: loop, hooks, skills, specs, CI"
+  },
+  {
+    "name": "area:app",
+    "color": "1D76DB",
+    "description": "The app and its hosting"
+  },
+  {
+    "name": "epic",
+    "color": "3E4B9E",
+    "description": "A goal made of several issues"
+  },
+  {
+    "name": "needs-info",
+    "color": "D876E3",
+    "description": "Something is still unconfirmed"
+  }
+]

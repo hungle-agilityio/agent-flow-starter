@@ -1,0 +1,12 @@
+# Secrets: only .env.example is committed.
+.env
+.env.*
+!.env.example
+# What a client gives us and what we show outside.
+in/
+out/
+.DS_Store
+.playwright-mcp/
+*.log
+.claude/settings.local.json
+.flow/loop/agent.env

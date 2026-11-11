@@ -1,0 +1,10 @@
+{
+  "name": "agent-flow",
+  "version": "1.0.0",
+  "description": "The issue-to-pull-request flow: guard hooks, flow skills, slash commands and sub-agents for a loop that builds labelled issues.",
+  "author": {
+    "name": "Hung Le"
+  },
+  "repository": "https://github.com/hungle-agilityio/agent-flow-starter",
+  "license": "MIT"
+}

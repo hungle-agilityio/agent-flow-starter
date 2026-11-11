@@ -1,0 +1,8 @@
+{
+  "setup_command": [
+    "bash",
+    "scripts/setup.sh"
+  ],
+  "alone_words": [],
+  "ci_setup": "      - name: Set up the stack\n        run: bash scripts/setup.sh\n"
+}
