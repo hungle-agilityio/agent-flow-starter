@@ -8,6 +8,8 @@
 | Medium | Several layers or one new rule | `/agent-flow:plan` | only if a trigger below applies | optional |
 | Hard | New feature, migration, cross-cutting rule, unclear scope | `/agent-flow:plan`, detailed, maybe split | yes | yes |
 
+Every loop build also runs `/code-review` on its diff before the pull request, whatever the difficulty: level medium, or level high plus the reviewer sub-agent when the branch changed a sensitive path (`paths.review_sensitive` of the flow config, `.flow/flow.toml`). It fixes or dismisses each finding in at most two rounds and reports them under `## Code review` in the pull request (ADR-029).
+
 ## Triggers (a Medium issue gets the reviewer when it touches)
 
 - Rounding, averages or any number the business reads
@@ -16,6 +18,7 @@
 - Queries on a list or dashboard (N+1 risk)
 - Migrations or data changes
 - Anything that handles secrets, input from users or external services
+- A sensitive path (`paths.review_sensitive`): then the reviewer runs at any difficulty, with `/code-review` at level high
 
 ## Gates
 
@@ -45,7 +48,8 @@ These hold in every mode.
 
 ## Modes
 
-- **Loop mode** (`agent-flow:work-queue`, ADR-008, ADR-009): the label `agent:ready` is Gate 1; the report is Gate 2, read after the work; the loop has already pushed and opened the pull request. Open points are decided and reported once, never asked mid-run. Claude builds never merge; the tick merges on the owner's approval comment (ADR-016), or the owner clicks Merge on GitHub.
+- **Loop mode** (`agent-flow:work-queue`, ADR-008, ADR-009): the label `agent:ready` is Gate 1; the report is Gate 2, read after the work; the loop has already pushed and opened the pull request. A `risk:high` issue stops after the plan with the label `agent:plan-review`; the owner's approval of that plan, given in the Project, is Gate 1 of the build (ADR-027). The loop skips an issue assigned to a team member (any login other than the owner), directly or through its epic (ADR-028). Each epic → main pull request gets one epic review before it is marked ready for the owner: the tick starts a run that reviews the whole epic with `/code-review` at level high, fixes in one round and leaves the rest in one `## Epic review` comment (ADR-029). The owner may run ultrareview by hand on any pull request; the loop never starts it. Open points are decided and reported once, never asked mid-run. Claude builds never merge; the tick merges on the owner's approval comment (ADR-016), or the owner clicks Merge on GitHub.
+- **Member work** (ADR-028): a member builds the issue by hand with the same branch, test-first and pull request rules; for a task of an epic the pull request goes into the epic branch with `Closes #<n>`; the owner clicks Merge.
 - Whatever the mode, the guardrails above hold. Gate 3 holds too, except in loop mode for the loop's own issue branch and pull request (ADR-009).
 
 ## Rules of the flow

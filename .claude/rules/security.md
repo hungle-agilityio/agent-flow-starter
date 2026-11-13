@@ -16,6 +16,12 @@
 - **Never** read, print or write the token. It lives in an environment variable on the user's machine.
 - Allowed without asking: read, create and edit issues, comments and labels in that repository. Always ask: opening a pull request, closing or reopening an issue, `gh api`, adding or changing a remote, `git push`; in loop mode the loop pushes its own issue branch and opens its pull request without asking (ADR-009). Claude builds never merge; the tick merges on the owner's approval comment (ADR-016). In loop mode `gh api` is allowed only for the review marks of ADR-016 (a 👀, 🚀 or 😕 reaction, a reply to a line comment, reading and resolving review threads); every other `gh api` asks outside loop mode. Never: delete, change repository settings, create or delete repositories, change authentication.
 
+## Before a release
+
+- `.flow/loop/release.py` runs the three checks of `.flow/loop/security_check.py` on the release commit: **deploy settings** (`manage.py check --deploy --fail-level WARNING` with the production settings), **dependencies** (`pip-audit` on the locked runtime dependencies), **secrets** (the added lines of the release diff). A check that fails or cannot run refuses the release and the dry-run (ADR-031). Never skip or work around a failed check: fix the cause and run it again.
+- After the dry-run passes, the release thread runs a security review of `git diff <Security review diff>` with the method of `/security-review` (high or medium severity, high confidence) and shows the findings on the release card. The review does not block by itself; the owner decides.
+- After the deploy, `.flow/loop/live_check.py` checks the live site (ADR-032).
+
 ## Sharing reports
 
 - A verify report may be published as a **private** artifact link only when its masking check is `clean`, the page shows demo data only, and the standing approval in the `share-report` skill's `rules.md` (`.flow/plugin/skills/share-report/rules.md`) is `on` (the user gave it on 2026-10-16 and can switch it off by editing one line).

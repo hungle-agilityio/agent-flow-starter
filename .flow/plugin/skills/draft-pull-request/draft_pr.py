@@ -4,11 +4,14 @@
 Usage: uv run python <this skill's folder>/draft_pr.py --title "[FEAT] ..."
        --what "..." --why "..." [--issue N] --report <report folder>
        (--compare <before-after folder> | --no-visual) [--out DIR]
+       [--plan FILE] [--tests-changed FILE] [--code-review FILE]
 
 It writes pr-body.md (What, Why, How tested with the real numbers of the verify report, Evidence,
-One concern, Closes), copies the changed before and after images into images/ to drag into the
-pull request, and writes draft.json. Nothing is created on GitHub: that waits for the user's
-approval (create-pull-request).
+One concern, Closes; with --plan a Plan section between What and Why, with --code-review a
+"Code review" section right after How tested, with --tests-changed a "Tests changed after the
+test author" section after those), copies the changed before and
+after images into images/ to drag into the pull request, and writes draft.json. Nothing is created
+on GitHub: that waits for the user's approval (create-pull-request).
 
 Exit code: 0 complete (ready to create when there is an issue number), 1 incomplete.
 """
@@ -122,6 +125,9 @@ def build_draft(
     compare: Path | None,
     no_visual: bool,
     out: Path,
+    plan: Path | None = None,
+    tests_changed: Path | None = None,
+    code_review: Path | None = None,
 ) -> dict[str, Any]:
     out.mkdir(parents=True, exist_ok=True)
     problems: list[str] = []
@@ -143,9 +149,17 @@ def build_draft(
         else ("_No issue number yet: create the issue first, then add the Closes line._")
     )
     link_block = f"{link}\n\n" if link else ""
+    plan_block = f"## Plan\n\n{plan.read_text().strip()}\n\n" if plan else ""
+    changed_block = (
+        f"## Tests changed after the test author\n\n{tests_changed.read_text().strip()}\n\n"
+        if tests_changed
+        else ""
+    )
+    review_block = f"## Code review\n\n{code_review.read_text().strip()}\n\n" if code_review else ""
     body = (
-        f"## What\n\n{what.strip()}\n\n## Why\n\n{why.strip()}\n\n"
-        f"## How tested\n\n{tested}\n\n## Evidence\n\n{link_block}{evidence}\n\n"
+        f"## What\n\n{what.strip()}\n\n{plan_block}## Why\n\n{why.strip()}\n\n"
+        f"## How tested\n\n{tested}\n\n{review_block}{changed_block}"
+        f"## Evidence\n\n{link_block}{evidence}\n\n"
         f"## One concern\n\n- [ ] This pull request does one thing only\n\n{ending}\n"
     )
     complete = not problems
@@ -181,10 +195,27 @@ def main(argv: list[str]) -> int:
         "--no-visual", action="store_true", help="the change is not visible to users"
     )
     parser.add_argument("--out", type=Path, help="folder (default: out/pr-draft/<branch>)")
+    parser.add_argument("--plan", type=Path, help="a file with the plan: a Plan section")
+    parser.add_argument(
+        "--tests-changed", type=Path, help="a file with the tests changed after the test author"
+    )
+    parser.add_argument(
+        "--code-review", type=Path, help="a file with the code review result: a Code review section"
+    )
     args = parser.parse_args(argv)
     out = args.out or Path("out") / "pr-draft" / branch_slug()
     result = build_draft(
-        args.title, args.what, args.why, args.issue, args.report, args.compare, args.no_visual, out
+        args.title,
+        args.what,
+        args.why,
+        args.issue,
+        args.report,
+        args.compare,
+        args.no_visual,
+        out,
+        args.plan,
+        args.tests_changed,
+        args.code_review,
     )
     for problem in result["problems"]:
         print(f"- {problem}")

@@ -31,7 +31,7 @@ fi
 
 echo "Stop the old '/loop 30m use the work-queue skill' session first, if it still runs."
 tmux new-session -d -s "$SESSION" -c "$LAB" \
-  "caffeinate -i bash -c 'while true; do date; uv run python $REL/agent_tick.py; sleep 300; done'"
+  "caffeinate -i bash -c 'while true; do date; uv run python $REL/agent_tick.py; uv run python $REL/uptime.py || true; sleep 300; done'"
 uv run python "$REL/agent_tick.py" started || echo "Could not send the 'loop started' message." >&2
 echo "Loop started in tmux session $SESSION (one tick every 5 minutes)."
 # Same rule as the tick: agent.env in the loop folder when it exists, else in the state folder (#199).

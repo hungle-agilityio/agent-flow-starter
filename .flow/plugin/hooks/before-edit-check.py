@@ -5,12 +5,16 @@ The call arrives as JSON on stdin. Exit code 2 blocks it and sends stderr back t
 Loop mode is on when FLOW_LOOP=1 (the unattended `work-queue` session);
 in an interactive session this hook does nothing. In loop mode it fails closed.
 
+The rule (which names are guarded) lives in guarded_paths.py beside this hook; this hook and
+ops/epic_pull_request.py read it. When guarded_paths.py cannot be loaded, or cannot answer, the
+edit is refused in loop mode, except for a file the issue lists (FLOW_ALLOWED_EDITS, below).
+
 Refused in loop mode (names are compared without regard to letter case, the Mac file system
 ignores it):
-  - anything in a .github or .claude folder, on any path, and .mcp.json: the loop must not
-    change its own rules, only a person does. The same for the flow plugin's source: plugins/
-    and .claude-plugin/ at the root of the git repository. In .claude/knowledge/ a new file is
-    allowed, a file that already exists on main is not;
+  - anything in a .github or .claude folder, on any path, and .mcp.json or flow.toml (any
+    folder): the loop must not change its own rules, only a person does. The same for the flow
+    plugin's source: plugins/ and .claude-plugin/ at the root of the git repository. In
+    .claude/knowledge/ a new file is allowed, a file that already exists on main is not;
   - pyproject.toml, uv.lock, conftest.py and the other tool config files (ruff.toml, mypy.ini,
     pytest.ini, .coveragerc, ...): they set the lint, type, test and coverage gates;
   - a test file that already exists on main under a folder of `checks.protected_test_dirs` in
@@ -35,26 +39,12 @@ import sys
 from collections.abc import Callable, Mapping
 from importlib import util
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 Runner = Callable[[list[str], Path], tuple[int, str]]
 
 EDIT_TOOLS = {"Edit", "Write", "NotebookEdit", "MultiEdit"}
-PROTECTED_DIRS = {".github", ".claude"}
-PROTECTED_FILES = {".mcp.json"}
-GATE_FILES = {
-    "pyproject.toml",
-    "uv.lock",
-    "conftest.py",
-    "ruff.toml",
-    ".ruff.toml",
-    "mypy.ini",
-    ".mypy.ini",
-    "setup.cfg",
-    "pytest.ini",
-    "tox.ini",
-    ".coveragerc",
-}
 
 LOOP_VARS = ("FLOW_LOOP",)
 SETTINGS_FILES = {"settings.json", "settings.local.json"}
@@ -152,7 +142,25 @@ def real_run(args: list[str], cwd: Path) -> tuple[int, str]:
     return done.returncode, done.stdout
 
 
-PLUGIN_DIRS = {"plugins", ".claude-plugin", ".flow"}
+def load_rule() -> tuple[ModuleType | None, str]:
+    """guarded_paths.py beside this hook, loaded by file path (the hook runs with python3 -I)."""
+    try:
+        module_path = Path(__file__).resolve().parent / "guarded_paths.py"
+        spec = util.spec_from_file_location("guarded_paths", module_path)
+        if spec is None or spec.loader is None:
+            raise OSError(f"cannot load {module_path}")
+        module = util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        if not callable(getattr(module, "guarded_kind", None)) or not isinstance(
+            getattr(module, "PLUGIN_DIRS", None), (set, frozenset)
+        ):
+            raise OSError(f"{module_path} does not hold the rule")
+        return module, ""
+    except Exception as error:  # fail closed: evaluate refuses the edit
+        return None, str(error)
+
+
+RULE, RULE_ERROR = load_rule()
 
 
 def git_root(path: Path, run: Runner) -> Path | None:
@@ -165,7 +173,9 @@ def git_root(path: Path, run: Runner) -> Path | None:
 
 
 def in_plugin_source(path: Path, run: Runner) -> bool:
-    """plugins/, .claude-plugin/ and .flow/ at the git root hold the flow, its plugin and marketplace."""
+    """plugins/ and .claude-plugin/ at the git root hold the flow plugin and its marketplace."""
+    if RULE is None:
+        return False
     root = git_root(path, run)
     if root is None:
         return False
@@ -173,7 +183,7 @@ def in_plugin_source(path: Path, run: Runner) -> bool:
         first = path.relative_to(root).parts[:1]
     except ValueError:
         return False
-    return bool(first) and first[0].casefold() in PLUGIN_DIRS
+    return bool(first) and first[0].casefold() in RULE.PLUGIN_DIRS
 
 
 def on_main(path: Path, project: Path, run: Runner) -> bool | None:
@@ -311,7 +321,6 @@ def evaluate(
         return []
     path = Path(file_path).resolve()
     parts = tuple(part.casefold() for part in path.parts)
-    name = parts[-1] if parts else ""
     project = project.resolve()
 
     if ".git" in parts:
@@ -319,7 +328,13 @@ def evaluate(
     if listed_edit(path, project, env):
         return listed_problems(path, parts, tool_name, tool_input or {})
 
-    if PROTECTED_DIRS & set(parts) or name in PROTECTED_FILES:
+    if RULE is None:
+        return [f"{path.name} not checked: guarded_paths.py could not be loaded ({RULE_ERROR})"]
+    try:
+        kind = RULE.guarded_kind(parts)
+    except Exception as error:  # fail closed
+        return [f"{path.name} not checked: guarded_paths.py could not answer ({error})"]
+    if kind == "rule":
         if ".github" not in parts and ".claude" in parts:
             after = parts[parts.index(".claude") + 1 :]
             if after[:1] == ("knowledge",) and len(after) > 1:
@@ -334,7 +349,7 @@ def evaluate(
             f"{path.name} is part of the flow plugin; the loop never changes its own rules, "
             "ask the user"
         ]
-    if name in GATE_FILES:
+    if kind == "gate":
         return [f"{path.name} sets the lint, type, test or dependency gates; ask the user"]
     if env.get("ALLOW_TEST_EDIT") == "1":
         return []

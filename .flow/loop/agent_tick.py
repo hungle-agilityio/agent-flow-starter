@@ -48,6 +48,8 @@ MARKER = "<!-- work-queue -->"
 STACKED_LINE = re.compile(r"^Stacked on\b", re.MULTILINE)
 DECISION_MARKER = "<!-- needs-decision -->"
 SELF_FIX_MARKER = "<!-- self-fix -->"
+EPIC_REVIEW_MARKER = "<!-- epic-review -->"
+EPIC_REVIEW_RUNS = 2
 PINNED_SCRIPT = Path(__file__).resolve().parent / "pinned_tests.py"
 PINNED_HIT = re.compile(r"^- `([^`]+::[^`]+)`", re.MULTILINE)
 PINNED_LINE = (
@@ -77,7 +79,8 @@ PLUGIN_NOTIFY_SECONDS = 60 * 60
 TIMED_OUT = 124
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?")
 LOG_TAIL = 20
-SKIP_LABELS = {"agent:running", "agent:review", "agent:failed"}
+PLAN_REVIEW = "agent:plan-review"
+SKIP_LABELS = {"agent:running", "agent:review", "agent:failed", PLAN_REVIEW}
 PR_LABELS = {"pr:ready-for-review", "pr:changes-requested", "pr:blocked", "pr:ci-failed"}
 RED_CI = {"FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
 REPLACED_RUNS = {"cancelled", "skipped"}
@@ -90,6 +93,7 @@ LABEL_COLORS = {
     "agent:running": ("FBCA04", "The loop is building this issue"),
     "agent:failed": ("D93F0B", "The loop could not finish this issue; see the comment"),
     "pr:blocked": ("B60205", "the loop cannot go on without the owner; the reason is a comment"),
+    PLAN_REVIEW: ("5319E7", "The loop posted a plan and waits for the owner's approval"),
     "agent:in-epic": (
         "0E8A16",
         "Task merged into its epic branch; closes with the epic pull request",
@@ -111,6 +115,7 @@ APPROVALS = {
 }
 IN_EPIC = "agent:in-epic"
 REPORT_LINK = "https://claude.ai/artifact/"
+MEMBER_CLAIMS = "member-claims"
 REDO_CONFLICT = "/redo merge origin/main into this branch and fix the conflict"
 UPDATE_FROM_MAIN = "Merge branch 'main'"
 DONE_MARKS = {"rocket", "confused"}
@@ -133,7 +138,7 @@ SIGNED_OUT_TEXT = "Claude Code is not signed in"
 ENTRYPOINT = "claude-desktop"  # `claude -p` offers the Artifact tool only with this
 LOW_PRIORITY = re.compile("")
 LOW_PRIORITY_TAIL = (
-    r"(?:started #|working on PR #|waiting: |queue empty, |"
+    r"(?:started #|working on PR #|reviewing epic PR #|waiting: |queue empty, |"
     r"PR #\d+ merged \(#\d+\); main is now )"
 )
 
@@ -264,6 +269,7 @@ class Target:
     ui: bool = False
     test_edits: tuple[str, ...] = ()
     allowed_edits: tuple[str, ...] = ()
+    epic_review: bool = False
 
 
 @dataclass
@@ -292,6 +298,7 @@ class Tick:
     main_head: str | None = None
     retargeted: set[int] = field(default_factory=set)
     rescued: set[int] = field(default_factory=set)
+    member_merged: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def runs(self) -> Path:
@@ -466,6 +473,11 @@ def loop_pull_requests(tick: Tick) -> list[dict[str, Any]]:
     ]
     seen = {pr["number"] for pr in opened}
     ended = [pr for pr in every if pr["number"] not in seen and pr.get("state") != "OPEN"]
+    tick.member_merged = [
+        pr
+        for pr in every
+        if pr.get("state") == "MERGED" and not pr.get("isCrossRepository") and not is_loop_pr(pr)
+    ]
     return [pr for pr in opened + ended if is_loop_pr(pr)]
 
 
@@ -560,6 +572,15 @@ def decision_stop(tick: Tick, number: int) -> None:
     tick.notify(f"{NAME} #{number} needs your decision: https://github.com/{REPO}/issues/{number}")
 
 
+def plan_posted(tick: Tick, key: str, number: int, worktree: Path) -> None:
+    """#471 AC2: a plan that waits for the owner is a hand-over, not a failure; one message."""
+    remove_worktree(tick, worktree, handed_over=True)
+    tick.say(f"{key}: plan posted; waiting for the owner")
+    tick.notify(
+        f"{NAME} #{number} plan waits for your approval: https://github.com/{REPO}/issues/{number}"
+    )
+
+
 def handle_end(tick: Tick, run: Path, outcome: str, prs: list[dict[str, Any]]) -> None:
     key = run.name
     kind, number = key.split("-", 1)
@@ -589,6 +610,9 @@ def handle_end(tick: Tick, run: Path, outcome: str, prs: list[dict[str, Any]]) -
     labels = names(tick.gh_json("issue", "view", number, "--json", "labels"))
     has_pr = any(closes(pr) == int(number) for pr in prs)
     opened = newest_open_pr(prs, int(number))
+    if "agent:running" not in labels and not has_pr and PLAN_REVIEW in labels:
+        plan_posted(tick, key, int(number), worktree)
+        return
     if "agent:running" not in labels or has_pr:
         remove_worktree(tick, worktree, handed_over=has_pr)
         tick.say(
@@ -942,6 +966,63 @@ def pr_needs_run(tick: Tick, pr: dict[str, Any]) -> bool:
     return "pr:ready-for-review" in labels and red
 
 
+def has_epic_review(pr: dict[str, Any]) -> bool:
+    """An owner comment whose first two lines are the marker and the epic review marker."""
+    for comment in pr.get("comments") or []:
+        if (comment.get("author") or {}).get("login") != OWNER:
+            continue
+        lines = str(comment.get("body") or "").strip().splitlines()
+        if [line.strip() for line in lines[:2]] == [MARKER, EPIC_REVIEW_MARKER]:
+            return True
+    return False
+
+
+def epic_review_count(tick: Tick, number: int) -> int:
+    """The epic review runs started for a pull request; a missing or unreadable file is 0."""
+    try:
+        return int((tick.home / f"epic-review-{number}").read_text().strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def awaits_epic_review(tick: Tick, pr: dict[str, Any]) -> bool:
+    """An epic pull request with no epic review comment and fewer than two review runs."""
+    return (
+        is_epic_pr(pr)
+        and not has_epic_review(pr)
+        and epic_review_count(tick, pr["number"]) < EPIC_REVIEW_RUNS
+    )
+
+
+def needs_epic_review(tick: Tick, pr: dict[str, Any]) -> bool:
+    """Open, no status label, every check green, no open change request, not yet reviewed."""
+    if pr["state"] != "OPEN" or names(pr) & PR_LABELS or not awaits_epic_review(tick, pr):
+        return False
+    checks = [check_state(c) for c in pr.get("statusCheckRollup") or []]
+    return bool(checks) and set(checks) == {"green"} and not open_requests(tick, pr)
+
+
+def tell_unfinished_epic_reviews(
+    tick: Tick, prs: list[dict[str, Any]], running: dict[str, bool]
+) -> None:
+    """Two epic review runs ended without the comment: tell the owner once, whatever the checks."""
+    for pr in prs:
+        number = pr["number"]
+        if pr["state"] != "OPEN" or not is_epic_pr(pr) or f"pr-{number}" in running:
+            continue
+        if has_epic_review(pr) or epic_review_count(tick, number) < EPIC_REVIEW_RUNS:
+            continue
+        told = tick.home / f"epic-review-{number}-told"
+        if told.exists():
+            continue
+        told.write_text(str(int(tick.host.now())))
+        tick.say(f"pr-{number}: the epic review did not finish after {EPIC_REVIEW_RUNS} runs")
+        tick.notify(
+            f"{NAME} epic PR #{number}: the epic review did not finish; "
+            f"review it without it: https://github.com/{REPO}/pull/{number}"
+        )
+
+
 def mark_green_ready(tick: Tick, prs: list[dict[str, Any]], running: dict[str, bool]) -> None:
     """A finished pull request with green checks and a report needs no build to get its label."""
     for pr in prs:
@@ -950,6 +1031,7 @@ def mark_green_ready(tick: Tick, prs: list[dict[str, Any]], running: dict[str, b
             pr["state"] != "OPEN"
             or names(pr) & PR_LABELS
             or ("claude.ai/artifact/" not in pr["body"] and not is_epic_pr(pr))
+            or awaits_epic_review(tick, pr)
         ):
             continue
         if f"pr-{number}" in running or f"issue-{closes(pr)}" in running:
@@ -1075,7 +1157,7 @@ def open_issue_list(tick: Tick) -> list[dict[str, Any]]:
             "--limit",
             "200",
             "--json",
-            "number,title,body,labels,createdAt,comments",
+            "number,title,body,labels,createdAt,comments,assignees",
         )
     return tick.open_issues
 
@@ -1181,6 +1263,90 @@ def epic_of(tick: Tick, issue: dict[str, Any]) -> dict[str, Any] | None:
         return None
     found = next((i for i in open_issue_list(tick) if i["number"] == number), None)
     return found if found is not None and "epic" in names(found) else None
+
+
+def members(item: dict[str, Any]) -> list[str]:
+    """A member is an assignee other than the owner; the logins come sorted."""
+    logins = {(a or {}).get("login") for a in item.get("assignees") or []}
+    return sorted(str(x) for x in logins if x and x != OWNER)
+
+
+def member_of(tick: Tick, issue: dict[str, Any]) -> tuple[str, int | None] | None:
+    """The issue's own first member wins over the open epic's first member."""
+    own = members(issue)
+    if own:
+        return own[0], None
+    epic = epic_of(tick, issue)
+    if epic is not None:
+        theirs = members(epic)
+        if theirs:
+            return theirs[0], int(epic["number"])
+    return None
+
+
+def member_text(found: tuple[str, int | None]) -> str:
+    """`alice`, or `alice (epic #600)` when the epic gave the member."""
+    login, epic = found
+    return login if epic is None else f"{login} (epic #{epic})"
+
+
+def member_note(found: tuple[str, int | None]) -> str:
+    """#525 AC1, AC3: ` (member alice)`, or ` (member bob, epic #600)` when the epic gave it."""
+    login, epic = found
+    return f" (member {login})" if epic is None else f" (member {login}, epic #{epic})"
+
+
+@dataclass(frozen=True)
+class MemberHolds:
+    """#525: the issues a member claimed, by path (lowest number first), and their notes."""
+
+    paths: dict[str, tuple[int, ...]]
+    notes: dict[int, str]
+
+    def holder(self, path: str, ignored: set[int]) -> int:
+        """#525 AC5: the lowest member issue that holds the path and is not ignored, or 0."""
+        return next((n for n in self.paths.get(path, ()) if n not in ignored), 0)
+
+
+def member_holds(tick: Tick, issues: list[dict[str, Any]]) -> MemberHolds:
+    """#525 AC1: an open issue with a member holds its paths unless it is running or in review."""
+    paths: dict[str, list[int]] = {}
+    notes: dict[int, str] = {}
+    for item in issues:
+        if names(item) & {"agent:running", "agent:review"}:
+            continue
+        found = member_of(tick, item)
+        if found is None:
+            continue
+        notes[item["number"]] = member_note(found)
+        for path in files_of(item.get("body") or ""):
+            paths.setdefault(path, []).append(item["number"])
+    return MemberHolds({path: tuple(sorted(found)) for path, found in paths.items()}, notes)
+
+
+def path_holder(
+    busy: dict[str, int],
+    owners: dict[str, set[int]],
+    member: MemberHolds,
+    path: str,
+    ignored: set[int],
+) -> tuple[int, str]:
+    """#525 AC5: the loop holder first, then the member holder with its note, else (0, "")."""
+    loop = shared_holder(busy, owners, path, ignored)
+    if loop:
+        return loop, ""
+    holder = member.holder(path, ignored)
+    return holder, member.notes.get(holder, "")
+
+
+def considered(issue: dict[str, Any], key: str, running: dict[str, bool]) -> bool:
+    """True for an issue choose() would otherwise look at."""
+    if key in running:
+        return False
+    labels = names(issue)
+    if "agent:failed" in labels and "agent:ready" not in labels:
+        return True
+    return "agent:ready" in labels and not labels & SKIP_LABELS
 
 
 def epic_start(
@@ -1299,11 +1465,17 @@ def choose(tick: Tick, prs: list[dict[str, Any]], running: dict[str, bool]) -> l
         if key not in running and opener in running and pr_needs_run(tick, pr):
             tick.say(f"{key}: waits for {opener} to end")  # its branch is still checked out
             continue
-        if len(chosen) < free and key not in running and pr_needs_run(tick, pr):
+        if len(chosen) >= free or key in running:
+            continue
+        review = needs_epic_review(tick, pr)
+        if review or pr_needs_run(tick, pr):
             prompt = f"Use the work-queue skill for pull request #{pr['number']} only."
             count = redo_count(tick, pr)
             what = f"{count} change requests open" if count else "CI"
             message = f"{NAME} working on PR #{pr['number']} ({what})"
+            if review:
+                prompt = prompt[:-1] + ": epic review."
+                message = f"{NAME} reviewing epic PR #{pr['number']}"
             chosen.append(
                 Target(
                     key,
@@ -1314,6 +1486,7 @@ def choose(tick: Tick, prs: list[dict[str, Any]], running: dict[str, bool]) -> l
                     ui=issue_needs_ui(tick, closes(pr)),
                     test_edits=issue_test_edits(tick, closes(pr)),
                     allowed_edits=issue_allowed_edits(tick, closes(pr)),
+                    epic_review=review,
                 )
             )
     if any(running.values()) or tick.main_red:
@@ -1326,6 +1499,7 @@ def choose(tick: Tick, prs: list[dict[str, Any]], running: dict[str, bool]) -> l
             for path in files_of(item.get("body") or ""):
                 busy.setdefault(path, item["number"])
                 owners.setdefault(path, set()).add(item["number"])
+    member = member_holds(tick, issues)
     open_numbers = {item["number"] for item in issues}
     ready = self_fixed_first(
         tick,
@@ -1342,6 +1516,10 @@ def choose(tick: Tick, prs: list[dict[str, Any]], running: dict[str, bool]) -> l
         if len(chosen) >= free:
             break
         key = f"issue-{issue['number']}"
+        found = member_of(tick, issue) if considered(issue, key, running) else None
+        if found is not None:
+            tick.say(f"{key}: assigned to {member_text(found)}; skipped")
+            continue
         depends = depends_on(issue.get("body") or "")
         retry = ""
         waiting = unmet(tick, depends, open_numbers)
@@ -1368,10 +1546,11 @@ def choose(tick: Tick, prs: list[dict[str, Any]], running: dict[str, bool]) -> l
         ignored = stack_issues(prs, parent_pr) if parent_pr is not None else set()
         if on_epic is not None:
             ignored = set(waiting)  # their files are in the epic branch this task builds on
-        shared = [p for p in sorted(files) if shared_holder(busy, owners, p, ignored)]
-        if shared:
-            holder = shared_holder(busy, owners, shared[0], ignored)
-            tick.say(f"{key}: waits for #{holder}, which also touches {shared[0]}")
+        held_by = ((p, *path_holder(busy, owners, member, p, ignored)) for p in sorted(files))
+        first = next((found for found in held_by if found[1]), None)
+        if first is not None:
+            path, holder, note = first
+            tick.say(f"{key}: waits for #{holder}{note}, which also touches {path}")
             continue
         if not labelled_by_owner(tick, issue["number"]):
             tick.say(f"{key}: agent:ready was not added by {OWNER}; skipped")
@@ -1479,7 +1658,9 @@ def start(tick: Tick, target: Target) -> bool:
             start_failed(tick, target, name)
             return False
     (tick.home / "start-failed" / target.key).unlink(missing_ok=True)
-    if target.key.startswith("pr-"):
+    if target.epic_review:  # no report of its own: the finish hook must ask for none
+        (lab / "out" / "pr-round.json").unlink(missing_ok=True)
+    elif target.key.startswith("pr-"):
         write_round(tick, worktree, lab, target.number, target.ui)
     if target.key.startswith("issue-"):
         stacked = tick.home / "stacked" / str(target.number)
@@ -1541,6 +1722,9 @@ def start(tick: Tick, target: Target) -> bool:
     pid = tick.host.spawn(wrapper, run / "log.txt")
     (run / "pid").write_text(str(pid))
     (run / "started").write_text(str(int(tick.host.now())))
+    if target.epic_review:
+        count = epic_review_count(tick, target.number) + 1
+        (tick.home / f"epic-review-{target.number}").write_text(str(count))
     tick.say(f"{target.key}: started (pid {pid})")
     if target.message:
         tick.notify(target.message)
@@ -2395,7 +2579,7 @@ def settle_merged_epic_tasks(tick: Tick, prs: list[dict[str, Any]]) -> None:
     record = tick.home / "epic-tasks-merged"
     seen = set(record.read_text().split()) if record.exists() else set()
     issues = {i["number"]: i for i in open_issue_list(tick)}
-    for pr in prs:
+    for pr in [*prs, *tick.member_merged]:
         base = str(pr.get("baseRefName") or "main")
         number, task = pr["number"], closes(pr)
         epic = issues.get(epic_branch.number_of(base) or 0)
@@ -2447,8 +2631,15 @@ def blocked_lines(
             for path in files_of(item.get("body") or ""):
                 busy.setdefault(path, item["number"])
                 owners.setdefault(path, set()).add(item["number"])
+    member = member_holds(tick, issues)
     ready = sorted(
-        (i for i in issues if "agent:ready" in names(i) and not names(i) & SKIP_LABELS),
+        (
+            i
+            for i in issues
+            if "agent:ready" in names(i)
+            and not names(i) & SKIP_LABELS
+            and member_of(tick, i) is None
+        ),
         key=lambda i: (i["createdAt"], i["number"]),
     )
     entries: list[tuple[int, int, str]] = []
@@ -2479,14 +2670,14 @@ def blocked_lines(
             ignored = stack_issues(prs, parent_pr) if parent_pr is not None else set()
             if epic is not None:
                 ignored = set(waiting)
-            shared: dict[int, str] = {}
+            shared: dict[int, tuple[str, str]] = {}
             for path in sorted(files_of(body)):
-                holder = shared_holder(busy, owners, path, ignored)
+                holder, note = path_holder(busy, owners, member, path, ignored)
                 if holder:
-                    shared.setdefault(holder, path)
+                    shared.setdefault(holder, (path, note))
             found = [
-                (m, f"#{number} waits for #{m}, which also touches {path}")
-                for m, path in sorted(shared.items())
+                (m, f"#{number} waits for #{m}{note}, which also touches {path}")
+                for m, (path, note) in sorted(shared.items())
             ]
         if found and labelled_by_owner(tick, number):
             blocked.add(number)
@@ -2518,19 +2709,11 @@ def say_blocked(
 def queue_empty(tick: Tick, prs: list[dict[str, Any]]) -> None:
     """AC12: 'queue empty' when no ready issue is left; blocked ones get #143's message."""
     waiting = sum(1 for pr in prs if pr["state"] == "OPEN")
-    issues = tick.open_issues
-    if issues is None:
-        issues = tick.gh_json(
-            "issue",
-            "list",
-            "--state",
-            "open",
-            "--limit",
-            "200",
-            "--json",
-            "number,title,body,labels,createdAt",
-        )
-    ready = [i for i in issues if "agent:ready" in names(i) and not names(i) & SKIP_LABELS]
+    ready = [
+        i
+        for i in open_issue_list(tick)
+        if "agent:ready" in names(i) and not names(i) & SKIP_LABELS and member_of(tick, i) is None
+    ]
     if ready:
         return
     message = f"{NAME} queue empty, {waiting} pull requests waiting"
@@ -2540,6 +2723,28 @@ def queue_empty(tick: Tick, prs: list[dict[str, Any]]) -> None:
     last.write_text(message)
     tick.say(message)
     tick.notify(message)
+
+
+def notice_member_claims(tick: Tick) -> None:
+    """A member on an issue the loop is building is told once per issue and member."""
+    record = tick.home / MEMBER_CLAIMS
+    seen = set(record.read_text().splitlines()) if record.exists() else set()
+    for item in open_issue_list(tick):
+        if not names(item) & {"agent:running", "agent:review"}:
+            continue
+        found = member_of(tick, item)
+        number = item["number"]
+        if found is None or f"{number} {found[0]}" in seen:
+            continue
+        who = member_text(found)
+        tick.say(f"issue-{number}: assigned to {who} while the loop builds it; the build goes on")
+        tick.notify(
+            f"{NAME} #{number} is assigned to {who} while the loop builds it: "
+            f"https://github.com/{REPO}/issues/{number}"
+        )
+        seen.add(f"{number} {found[0]}")
+        with record.open("a") as handle:
+            handle.write(f"{number} {found[0]}\n")
 
 
 def tick_once(host: Host, home: Path) -> list[str]:
@@ -2562,6 +2767,7 @@ def tick_once(host: Host, home: Path) -> list[str]:
         tidy_failed(tick)
         needs_you(tick, prs)
         running = running_keys(tick)
+        tell_unfinished_epic_reviews(tick, prs, running)
         mark_green_ready(tick, prs, running)
         settle_children(tick, prs)
         settle_epic_children(tick, prs)
@@ -2578,6 +2784,7 @@ def tick_once(host: Host, home: Path) -> list[str]:
         rescue_epic_merges(tick, prs)
         tidy_ended(tick, prs)
         tidy_worktrees(tick, prs, running)
+        notice_member_claims(tick)
         tick.main_red = main_is_red(tick)
         if paused(tick):
             tick.say("paused after the plan limit; no build started")

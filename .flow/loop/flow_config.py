@@ -22,6 +22,8 @@ OLD_CONFIG = Path("ops") / "flow.toml"
 STRING = "string"
 WORDS = "list of strings"
 COMMANDS = "list of lists of strings"
+WHOLE = "whole number"
+BOOLEAN = "true or false"
 
 
 def project_of(module_dir: Path) -> Path:
@@ -65,6 +67,13 @@ SCHEMA: dict[str, dict[str, str]] = {
         "protected_test_dirs": WORDS,
     },
     "release": {"timezone": STRING, "deploy_line": STRING},
+    "live": {
+        "url": STRING,
+        "username": STRING,
+        "wait_minutes": WHOLE,
+        "load_warn_seconds": WHOLE,
+        "persistent_database": BOOLEAN,
+    },
     "plugin": {"id": STRING, "marketplace": STRING},
     "paths": {
         "loop_dir": STRING,
@@ -77,27 +86,43 @@ SCHEMA: dict[str, dict[str, str]] = {
         "templates_dir": STRING,
         "code_dirs": WORDS,
         "flow_dirs": WORDS,
+        "review_sensitive": WORDS,
     },
 }
 # A file written before the plugin existed has no [plugin] table; the tick stops on the empty key.
-OPTIONAL_SECTIONS = {"plugin", "paths"}
+# A file without [live] has no live check (live=None).
+OPTIONAL_SECTIONS = {"live", "plugin", "paths"}
 # A missing key of [paths] takes this repository's layout.
 PATH_DEFAULTS: dict[str, str | list[str]] = {
     "loop_dir": ".flow/loop",
     "plugin_dir": ".flow/plugin",
     "intent_file": "docs/intent/{feature}.md",
     "specs_dir": "docs/specs",
-    "spec_pr_dirs": ["docs/intent", "docs/specs"],
+    "spec_pr_dirs": ["docs/intent", "docs/specs", "docs/design"],
     "plans_dir": "docs/plans",
     "decisions_dir": "docs/decisions",
     "templates_dir": "docs/templates",
     "code_dirs": ["src"],
-    "flow_dirs": [".flow/", ".claude/", ".github/", "docs/intent/", "docs/specs/", "scripts/"],
+    "flow_dirs": [
+        ".flow/", ".claude/", ".github/", "docs/intent/", "docs/specs/", "docs/design/", "scripts/"
+    ],
+    "review_sensitive": [],
 }
 
 
 class FlowConfigError(Exception):
     """The config file is unreadable or wrong; the message names the file and the key."""
+
+
+@dataclass(frozen=True)
+class LiveConfig:
+    """The live site a release is checked on; `url` has no trailing `/`."""
+
+    url: str
+    username: str
+    wait_minutes: int
+    load_warn_seconds: int
+    persistent_database: bool
 
 
 @dataclass(frozen=True)
@@ -123,14 +148,16 @@ class FlowConfig:
     paths_plugin_dir: str = ".flow/plugin"
     paths_intent_file: str = "docs/intent/{feature}.md"
     paths_specs_dir: str = "docs/specs"
-    paths_spec_pr_dirs: tuple[str, ...] = ("docs/intent", "docs/specs")
+    paths_spec_pr_dirs: tuple[str, ...] = ("docs/intent", "docs/specs", "docs/design")
     paths_plans_dir: str = "docs/plans"
     paths_decisions_dir: str = "docs/decisions"
     paths_templates_dir: str = "docs/templates"
     paths_code_dirs: tuple[str, ...] = ("src",)
     paths_flow_dirs: tuple[str, ...] = (
-        ".flow/", ".claude/", ".github/", "docs/intent/", "docs/specs/", "scripts/"
+        ".flow/", ".claude/", ".github/", "docs/intent/", "docs/specs/", "docs/design/", "scripts/"
     )
+    paths_review_sensitive: tuple[str, ...] = ()
+    live: LiveConfig | None = None
 
 
 def _is_words(value: object) -> bool:
@@ -142,6 +169,10 @@ def _has_kind(value: object, kind: str) -> bool:
         return isinstance(value, str)
     if kind == WORDS:
         return _is_words(value)
+    if kind == WHOLE:
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+    if kind == BOOLEAN:
+        return isinstance(value, bool)
     return isinstance(value, list) and all(_is_words(item) for item in value)
 
 
@@ -200,6 +231,7 @@ def load(path: Path | None = None) -> FlowConfig:
     data = _read(path)
     _check(data, _label(path))
     project, loop, checks, release = (data[s] for s in list(SCHEMA)[:4])
+    live = data.get("live")
     plugin = data.get("plugin", {})
     paths: dict[str, Any] = {**PATH_DEFAULTS, **data.get("paths", {})}
     return FlowConfig(
@@ -230,6 +262,18 @@ def load(path: Path | None = None) -> FlowConfig:
         paths_templates_dir=_text(paths["templates_dir"]),
         paths_code_dirs=tuple(paths["code_dirs"]),
         paths_flow_dirs=tuple(paths["flow_dirs"]),
+        paths_review_sensitive=tuple(paths["review_sensitive"]),
+        live=None if live is None else _live(live),
+    )
+
+
+def _live(values: dict[str, Any]) -> LiveConfig:
+    return LiveConfig(
+        url=values["url"].rstrip("/"),
+        username=values["username"],
+        wait_minutes=values["wait_minutes"],
+        load_warn_seconds=values["load_warn_seconds"],
+        persistent_database=values["persistent_database"],
     )
 
 
@@ -238,6 +282,8 @@ def _text(value: object) -> str:
 
 
 def _words(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
     if isinstance(value, tuple):
         return " ".join(_words(item) for item in value)
     return str(value)
@@ -248,6 +294,10 @@ def lookup(config: FlowConfig, dotted: str, label: str) -> str:
     section, _, key = dotted.partition(".")
     if key not in SCHEMA.get(section, {}):
         raise FlowConfigError(f"{label}: unknown {dotted}")
+    if section == "live":
+        if config.live is None:
+            raise FlowConfigError(f"{label}: no [live] table")
+        return _words(getattr(config.live, key))
     return _words(getattr(config, f"{section}_{key}"))
 
 

@@ -22,7 +22,7 @@ The owner decided (2026-10-28):
 - **The Gate 2 report is a comment in the pull request** that links to the verify report (screenshots, masking check) built by `build-verify-report` and `share-report`.
 - **No branch protection.** A private repository needs a paid plan for it. The hooks keep blocking merges and pushes to `main` in loop mode. (Replaced by ADR-015: the repository is public, so a ruleset on `main` is free.)
 - **Fast lane for Easy work.** An Easy request (one task, `risk:low`, no new rule, no migration) skips the spec pull request. The short spec goes in the issue body and Gate 1 is the owner's "OK" in the Project. The owner wants the flow simple and easy to control.
-- **The spec pull request is opened and merged from the Mac mini** through Remote Control with `gh` and the owner's login, like issues and comments (ADR-011), so it carries no Claude attribution. The Project merges only a pull request that changes nothing outside `docs/intent/` and `docs/specs/`, and only after the owner says "Merge PR spec".
+- **The spec pull request is opened and merged from the Mac mini** through Remote Control with `gh` and the owner's login, like issues and comments (ADR-011), so it carries no Claude attribution. The Project merges only a pull request that changes nothing outside `docs/intent/`, `docs/specs/` and `docs/design/`, and only after the owner says "Merge PR spec".
 - **Names.** `FLOW_LOOP=1` keeps its meaning (the hooks' loop mode). The number of parallel runs gets its own variable, `AGENT_CONCURRENCY` (default 1).
 
 Rejected:

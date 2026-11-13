@@ -122,7 +122,7 @@ A task belongs to an epic when its issue body has the line `Part of the epic #<N
 - A dependency on a task of the same epic is met when that issue has `agent:in-epic`. A dependency outside the epic must be closed.
 - Each tick (`merge_epic_tasks`), an open loop pull request into the branch is merged with `gh pr merge --merge --delete-branch --match-head-commit <head>`, without an owner comment, when it is not a draft, has `pr:ready-for-review`, at least one check and every check green, a `https://claude.ai/artifact/` link in its body, no open change request, no run going, and a merge state other than `DIRTY` or `BLOCKED`. At most one is merged per epic branch per tick. A pull request that is `BEHIND` is updated with `gh pr update-branch` and merged at a later tick. Nothing is merged into the branch of a closed epic.
 - After the merge, by the tick or by hand, the issue gets `agent:in-epic` and loses `agent:review`, `agent:running` and `agent:ready`, and stays open until the epic pull request into `main` closes it. The tick logs `pr-<n>: merged into <branch>; #<issue> agent:in-epic` and sends one ntfy message `PR #<n> merged into <branch> (#<issue>)` (once per pull request, `~/.starter/epic-tasks-merged`).
-- Only the tick pushes `epic/*` or deletes it; a build never does. Merging `main` happens in a throw-away worktree under `~/.starter/epic-work/<N>`; the main checkout is not touched.
+- Only the tick pushes `epic/*` or deletes it, except that a member creates the branch of an epic they claimed before any loop task of it started (`## Team members`); a build never does. Merging `main` happens in a throw-away worktree under `~/.starter/epic-work/<N>`; the main checkout is not touched.
 - When `origin/main` has commits the branch lacks, it is merged into the branch with a merge commit and pushed.
 - A task pull request that conflicts with the branch (`DIRTY`, or a failed update): the tick posts once per head commit on that pull request `/redo merge origin/epic/<N>-<slug> into this branch and fix the conflict` (`~/.starter/epic-redo`). A conflict with `main`: the merge is aborted, the branch stays as it was, and one message per hour names it (`~/.starter/epic-conflict-<N>`).
 - The log has one line per epic per tick: `epic #<N>: branch epic/<N>-<slug>, up to date with main`, or `..., conflict with main`.
@@ -142,6 +142,22 @@ When every open issue with `Part of the epic #<N>` has `agent:in-epic` (at least
 - `main` keeps going into the branch each tick; a conflict sends one message per hour.
 
 Tests: `.flow/loop/tests/test_epic_pull_request.py`.
+
+## Team members
+
+An assignee other than the owner (`hungle-agilityio`), on the issue or on its epic, makes the issue that member's work: the loop skips it (`issue-<n>: assigned to <login>; skipped`, or `assigned to <login> (epic #<N>)`), never retries it when it has `agent:failed`, and does not count it as ready. The task's own member wins over the epic's.
+
+- Claim: `gh issue edit <n> --add-assignee @me`. An epic is claimed the same way on the epic issue.
+- Give back: `gh issue edit <n> --remove-assignee @me`. The loop takes the issue at the next tick when it still has `agent:ready`.
+- Hand off: `gh issue edit <n> --remove-assignee @me --add-assignee <login>`.
+- A claimed issue holds the files of its `## Files likely touched` until it is closed or the member is removed, so list them before claiming: a ready loop issue that lists one of them waits (`## Guards`).
+- Claiming an issue labelled `agent:running` or `agent:review` does not stop the loop's build: the tick only logs it and sends one message per issue and member (`~/.starter/member-claims`). Check the label first.
+- Your branch is `<kind>/<n>-<short-description>`. The pull request for a task of an epic goes into `epic/<N>-<slug>` with `Closes #<n>` in its body, otherwise into `main`.
+- When `epic/<N>-<slug>` does not exist yet (no loop task of the epic has started), create it from main with exactly the name the tick uses (`branch_name()` in `.flow/loop/epic_branch.py`): `epic/<N>-` and the epic title without `Epic:`, lowercase, every run of other characters turned into one `-`, cut at 40 characters, no `-` at either end. For example `git push origin origin/main:refs/heads/epic/<N>-<slug>`. From then on the tick keeps it up to date and opens the epic pull request as usual.
+- A pull request merged by hand into an epic branch marks its task `agent:in-epic` at the next tick, so the epic's next tasks start. The tick never merges or comments on it.
+- The owner clicks Merge. Only the owner's `agent:ready` hands an issue to the loop.
+
+Tests: `.flow/loop/tests/test_tick_member_assignment.py`, `.flow/loop/tests/test_tick_member_files.py`.
 
 ## The Artifact tool check
 
@@ -174,7 +190,7 @@ Review a loop pull request on GitHub like any other (ADR-016):
 The tick does not start a ready issue (ADR-015):
 
 - while any issue named on a `Depends on` line is still open (every `#number` on the line counts);
-- while one of its files (the backticked paths in the bullets of `## Files likely touched`) is also a file of an open `agent:running` or `agent:review` issue, or of an issue chosen earlier in the same tick: the log says `issue-<n>: waits for #<m>, which also touches <path>`;
+- while one of its files (the backticked paths in the bullets of `## Files likely touched`) is also a file of an open `agent:running` or `agent:review` issue, or of an issue chosen earlier in the same tick: the log says `issue-<n>: waits for #<m>, which also touches <path>`; or a file of an open issue that has a member (on the issue or its epic), with any label: the log says `issue-<n>: waits for #<m> (member <login>), which also touches <path>`, or `(member <login>, epic #<N>)` when the epic gave the member. A running or review issue keeps the first line;
 - with other builds, when its body lists no file: it runs alone, like `risk:high`;
 - in a tick where the latest completed `Checks` run on `main` is not green: pull request runs still start, and ntfy says `main is red at <sha>: <run url>` once per commit. An unreadable run counts as green, with a log line.
 
@@ -216,6 +232,8 @@ Each ntfy post has the title `Agent flow starter` and a priority (#167). "Rings"
 | `Agent flow starter queue empty, <w> pull requests waiting` | no | nothing to start and nothing running; again only when the text changes |
 | `Agent flow starter Claude Code is not signed in (~/.claude); builds wait. Sign in with: claude auth login` | yes (urgent) | `claude auth status` says `loggedIn` is false; no build starts; once, and again after a signed-in check |
 | `Agent flow starter loop started on <host name>` | yes | `uv run python .flow/loop/agent_tick.py started`, by hand or from launchd at login; takes no lock, runs no tick; sends nothing without `NTFY_TOPIC` |
+| `Agent flow starter site is down since <HH:MM> (Vietnam time): <reason>` | yes | after two failed probes in a row, once per outage |
+| `Agent flow starter site is back after <m> minutes` | no | the first good probe after a down message |
 
 The loop's open pull requests with their status labels: <https://github.com/hungle-agilityio/agent-flow-starter/pulls?q=is%3Apr+is%3Aopen+%22work-queue%22+in%3Abody>
 
@@ -225,7 +243,47 @@ The loop's open pull requests with their status labels: <https://github.com/hung
 
 `--dry-run` prints the same plan (commit, branch, tag, pull requests) and pushes nothing.
 
+After the push it creates the GitHub Release page of the new tag: it writes `<loop.state_dir>/release-<tag>.md` (the two pull request groups, and with `--notes-url <url>` a last line `Release notes: <url>`) and runs `gh release create <tag> --title <tag> --notes-file <file> --verify-tag`. On success the first line of the output is `Release page: <url>`. If the page cannot be created (`gh` fails, is missing or takes more than 60 seconds) the release still exits 0 and stderr gets one line `warning: GitHub Release not created (<reason>); run: gh release create ...` with the command to run again. The step is skipped when `origin` is not a GitHub URL and in `--dry-run`.
+
+When `.claude/project-instructions.md` on the release commit differs from the last release (`origin/deploy`), or on a first release when the file exists, the plan ends with `Project settings: .claude/project-instructions.md changed since the last release; paste it into Project settings.` (in `--dry-run` too; the deploy line stays after it). It reads git objects only; if that check fails the line is left out and the release goes on.
+
 It refuses with exit 1 and one line, pushing nothing, when the newest `Checks` run of the commit is missing, still running or not successful; when `origin/deploy` already points at the commit (`nothing new to release`); or when `origin/deploy` is not an ancestor of the commit.
+
+## Live check
+
+`uv run python .flow/loop/live_check.py [--commit <commit>]` checks the live site after a release; the release thread runs it after `.flow/loop/release.py`. Without `--commit` it runs `git fetch origin` and checks `origin/deploy`. It waits until `<url>/healthz/` answers 200 with `X-Commit` equal to the commit (one request every 20 seconds, at most `wait_minutes`), signs in as `username` in headless Chromium, opens every step of `.flow/loop/regression_screens.json` with its load time, then checks five security headers and redirects (`https-redirect`, `frame-options`, `hsts`, `login-required`, `healthz`). It takes no screenshot, writes no file and prints no page text or setting value. Install the browser once with `uv run playwright install chromium`.
+
+The table `[live]` of `.flow/flow.toml` holds `url`, `username`, `wait_minutes`, `load_warn_seconds` and `persistent_database`. `.flow/loop/agent.env.example` lists three variables for `agent.env`: `LIVE_CHECK_PASSWORD` (the password of `username` on the live site; the only one this check reads), `RENDER_API_KEY` and `RENDER_SERVICE_ID` (for `.flow/loop/rollback.py`). A variable set in the environment replaces the file's value.
+
+Every line goes to stdout:
+
+- `live: <commit> after <m>m<ss>s`: the commit is served.
+- `PASS <name> <s>s` or `PASS <name>`: the step or the check passed.
+- `SLOW <name> <s>s (over <n>s)`: the step passed but took more than `load_warn_seconds`.
+- `FAIL <name>: <reason>`, `FAIL wait: ...`, `FAIL sign-in: ...`: what failed.
+- `result: pass`, `result: pass, <k> slow` or `result: fail`: the last line.
+
+Exit codes: 0 every check passed (SLOW counts as passed), 1 a line is FAIL, 2 the check could not run (no `[live]` table, `LIVE_CHECK_PASSWORD` not set, an unknown commit, a failing git command, an unreadable `regression_screens.json`, Chromium cannot start), with one line on stderr and no result line.
+
+## Rollback
+
+`uv run python .flow/loop/rollback.py [--dry-run] [--to <tag>]` returns the live site to an earlier release through Render's API; the release thread runs it on the owner's request (first `--dry-run` on a card, then the real run). It runs `git fetch origin --tags`, takes the newest release tag (`vYYYY.MM.DD` or `vYYYY.MM.DD.N`) on `origin/deploy` as the current release and, as the target, the release tag before it on another commit, or the tag given with `--to`. It finds Render's newest `live` or `deactivated` deploy of the target's commit and asks Render to roll back to it. It reads two variables from `agent.env` (a variable set in the environment replaces the file's value): `RENDER_API_KEY` (a secret; it never appears in any output) and `RENDER_SERVICE_ID` (`srv-...`).
+
+It prints `Current: <tag> <sha7>`, `Roll back to: <tag> <sha7> <subject>`, `Render deploy: <id>`, the number of migrations since the target, and `Pull requests undone:` with the pull requests merged since the target (as `release.py` lists them) or `  (none)`. `--dry-run` stops there and changes nothing. Without it, it starts the rollback and prints `Rollback started. Check it with: uv run python .flow/loop/live_check.py --commit <sha>`.
+
+It refuses with exit 1 and one line on stderr, before any change: no `[live]` table; `RENDER_API_KEY` or `RENDER_SERVICE_ID` not set; `origin/deploy` missing or not on a release tag; no earlier release; a `--to` tag that is not an earlier release on `origin/deploy`; migrations since the target while `[live] persistent_database = true` (write a reversing migration on `main` and release it); a failing git command; no Render deploy of the target; a Render answer other than 2xx or none within 30 seconds.
+
+The rollback never moves `deploy` or a tag and pushes nothing, and Render's Auto-Deploy stays on (only the dashboard's Rollback button turns it off). So the next release deploys as usual: fix the problem on `main`, then release again.
+
+## Uptime
+
+`uv run python .flow/loop/uptime.py` makes one probe of the live site: a `GET` of `/healthz/` at `live.url` (60-second timeout). The site is up when the answer is 200 with the body `ok`. `.flow/loop/start-loop.sh` runs it after every tick, so every 5 minutes; a failed probe never stops the loop, and the script always exits 0. Without a `[live]` table it does nothing.
+
+After two failed probes in a row it sends one message, `Agent flow starter site is down since <HH:MM> (Vietnam time): <reason>` (`HTTP <status>`, `timeout after 60s` or `no connection`); a single failure sends nothing, because the free Render service can be slow to wake. The first good probe after that message sends `Agent flow starter site is back after <m> minutes`. Messages go to ntfy and Slack like the tick's (`NTFY_TOPIC`, `SLACK_WEBHOOK_URL`).
+
+The state is `~/.starter/uptime.json`: `{"failures": <n>, "down_since": "<ISO time>" or null, "alerted": true or false}`; a missing or unreadable file counts as no failure.
+
+After this change reaches the Mac mini, restart the loop once (stop it, then start it) so the new loop line with the probe is used.
 
 ## Kept worktrees
 
@@ -233,4 +291,4 @@ Each tick removes a kept `worktrees/issue-<n>` when issue #n is closed and a kep
 
 ## Tests
 
-The loop's own tests live in the repository the flow was copied from; `.flow/loop/tests/` holds the tests of `setup_project.py`.
+`uv run pytest .flow/loop/tests -q --no-cov` (gh, git, claude and the clock are faked; CI runs them in "Hook and skill tests").
