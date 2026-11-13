@@ -1,6 +1,7 @@
 # ADR-017: Deploys go out only by release
 
 - Status: Accepted (replaces decision Q3 of `docs/specs/auto-deploy/spec.md`)
+- Item 5 replaced by ADR-032 (2026-11-12).
 - Date: 2026-10-30
 
 ## Context

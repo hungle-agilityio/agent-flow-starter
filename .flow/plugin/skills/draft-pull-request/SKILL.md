@@ -11,7 +11,7 @@ The draft is built from real evidence, not from memory. Nothing is created on Gi
 
 ```
 uv run python <this skill's folder>/draft_pr.py --title "[FEAT] ..." --what "..." --why "..." \
-  [--issue N] --report out/verify/<folder> (--compare out/before-after/<folder> | --no-visual) [--out DIR]
+  [--issue N] --report out/verify/<folder> (--compare out/before-after/<folder> | --no-visual) [--out DIR] [--plan FILE] [--tests-changed FILE] [--code-review FILE]
 ```
 
 `<this skill's folder>` is the base directory Claude Code gives when this skill loads: an absolute path in the installed plugin. Run the script from there as one plain command, with no pipe, redirection or `2>&1`, and never from `.flow/plugin/` in the repository: only that plain call runs without a prompt, so any other form stops a loop build.
@@ -31,6 +31,7 @@ Output (default `out/pr-draft/<branch>/`, git-ignored): `pr-body.md`, `images/` 
 ## Rules
 
 - Only pages labelled `changed` or `did not exist before` are copied to `images/`; "no visible difference" is left out.
-- The report link is the private artifact link when the report was shared. In loop mode it must be the artifact link: run `share-report` first, and with no link the loop opens no pull request (`work-queue` step 8; the hook refuses a loop body without it). "Not shared" with the local path stays allowed only in an interactive session.
+- The report link is the private artifact link when the report was shared. In loop mode it must be the artifact link: run `share-report` first, and with no link the loop opens no pull request (`work-queue` step 10; the hook refuses a loop body without it). "Not shared" with the local path stays allowed only in an interactive session.
+- `--plan FILE` adds a "## Plan" section holding the file's text, right after "## What" and before "## Why". `--tests-changed FILE` adds a "## Tests changed after the test author" section holding the file's text, right after "## How tested". `--code-review FILE` adds a "## Code review" section holding the file's text, right after "## How tested" and before "## Tests changed after the test author" when that is given too. Without them the body is unchanged.
 - Never invent an issue number. Create the issue first (`create-issue`), then run the draft again with `--issue`.
 - Images are dragged into the pull request by the user from `images/`; the description names the files.

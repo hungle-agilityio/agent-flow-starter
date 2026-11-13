@@ -21,7 +21,7 @@ def test_every_cited_decision_record_is_here() -> None:
     cited = {number for text in texts for number in CITED.findall(text)}
     present = {p.name[4:7] for p in DECISIONS.glob("ADR-*.md")}
     assert cited - present == set()
-    assert {"020", "021", "022", "023", "024", "025"} <= present
+    assert {f"{n:03d}" for n in range(8, 34)} <= present
 
 
 def test_the_decisions_index_lists_exactly_the_files() -> None:
@@ -41,7 +41,8 @@ def test_loop_builds_may_not_edit_the_flow_folder_unless_listed(tmp_path: Path) 
     assert spec is not None and spec.loader is not None
     hook = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(hook)
-    assert ".flow" in hook.PLUGIN_DIRS
+    rule, _ = hook.load_rule()
+    assert rule is not None and ".flow" in rule.PLUGIN_DIRS
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     (tmp_path / ".flow" / "loop").mkdir(parents=True)
     target = tmp_path / ".flow" / "loop" / "agent_tick.py"
