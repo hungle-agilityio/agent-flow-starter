@@ -34,3 +34,4 @@
 - An issue body may change without the owner: always from the loop's comment marked `<!-- self-fix -->`, and only in the technical cases.
 - The self-fix rules live in the `work-queue` skill text; the owner checks them in review through the Decisions comment and the pull request section.
 - `.claude/` files stay a hand-built exception (ADR-023); a self-fix never adds one.
+- Widened by ADR-034: a stop the build cannot self-fix is healed by the next tick, up to 3 times.
