@@ -32,10 +32,10 @@ Gates 1 and 2 are always a human decision, never assumed (in loop mode the label
 
 These apply to every helper and to the main assistant.
 
-1. The AI never changes the requirement. What an issue asks for is changed only by the user, in the issue. Exception: the technical self-fix of a loop build, within its limits (`knowledge/decisions/ADR-024-loop-self-fix.md`).
+1. The AI never changes the requirement. What an issue asks for is changed only by the user, in the issue. Exception: the technical self-fix of a loop build, within its limits (`knowledge/decisions/ADR-024-loop-self-fix.md`), and the heal run of the next tick, within its limits (`knowledge/decisions/ADR-034-depends-and-heal.md`).
 2. The AI never widens the scope. An idea beyond the approved plan is raised and written down, not built.
 3. The reviewer does not rely on the implementer's reasoning. It works out what is correct from the issue, the rules and the code, then compares with the diff.
-4. No endless loops: at most two rounds of AI fix and review. If a finding is still open after the second round, the work stops and a human decides.
+4. No endless loops: at most two rounds of AI fix and review. If a finding is still open after the second round, the work stops and a human decides. Exception: heal runs, at most 3 per issue (ADR-034).
 
 ## Guardrails
 

@@ -14,8 +14,8 @@ EPIC_PREFIX = "epic/"
 
 
 def epic_number(body: str) -> int | None:
-    """The first `Part of the epic #N` line of a task's issue body."""
-    match = re.search(r"^\s*Part of the epic #(\d+)", body or "", re.MULTILINE)
+    """The first `Part of the epic #N` anywhere in a line of a task's issue body."""
+    match = re.search(r"\bPart of the epic #(\d+)", body or "", re.MULTILINE)
     return int(match.group(1)) if match else None
 
 

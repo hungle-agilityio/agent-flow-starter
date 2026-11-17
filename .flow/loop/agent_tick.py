@@ -48,6 +48,10 @@ MARKER = "<!-- work-queue -->"
 STACKED_LINE = re.compile(r"^Stacked on\b", re.MULTILINE)
 DECISION_MARKER = "<!-- needs-decision -->"
 SELF_FIX_MARKER = "<!-- self-fix -->"
+HEAL_MARKER = "<!-- heal -->"
+NEEDS_OWNER_MARKER = "<!-- needs-owner -->"
+HEALS = 3
+HEAL_FLAG = "heal"
 EPIC_REVIEW_MARKER = "<!-- epic-review -->"
 EPIC_REVIEW_RUNS = 2
 PINNED_SCRIPT = Path(__file__).resolve().parent / "pinned_tests.py"
@@ -121,7 +125,7 @@ UPDATE_FROM_MAIN = "Merge branch 'main'"
 DONE_MARKS = {"rocket", "confused"}
 GREEN_CHECKS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
 COMMENT_ID = re.compile(r"(?:issuecomment-|discussion_r)(\d+)")
-DEPENDS_LINE = re.compile(r"^\W*Depends on\b(.*)$", re.IGNORECASE | re.MULTILINE)
+DEPENDS_LINE = re.compile(r"\bDepends on\b(.*)$", re.IGNORECASE | re.MULTILINE)
 FILES_HEADING = re.compile(r"^##\s+Files likely touched\s*$", re.IGNORECASE | re.MULTILINE)
 TEST_EDITS_HEADING = re.compile(
     r"^##\s+Existing tests that change\s*$", re.IGNORECASE | re.MULTILINE
@@ -270,6 +274,8 @@ class Target:
     test_edits: tuple[str, ...] = ()
     allowed_edits: tuple[str, ...] = ()
     epic_review: bool = False
+    heal: bool = False
+    archive_old: bool = False
 
 
 @dataclass
@@ -299,6 +305,7 @@ class Tick:
     retargeted: set[int] = field(default_factory=set)
     rescued: set[int] = field(default_factory=set)
     member_merged: list[dict[str, Any]] = field(default_factory=list)
+    failed_at_start: dict[int, float] = field(default_factory=dict)
 
     @property
     def runs(self) -> Path:
@@ -568,8 +575,155 @@ def needs_decision(tick: Tick, run: Path, number: str) -> bool:
 
 def decision_stop(tick: Tick, number: int) -> None:
     """#260 AC1, AC3: record the stop as a decision; one message per stop."""
-    record_failure(tick, number, "decision", "needs the owner's decision")
-    tick.notify(f"{NAME} #{number} needs your decision: https://github.com/{REPO}/issues/{number}")
+    record_failure(tick, number, "decision", "needs the owner's decision", notify=False)
+    message = stop_message(tick, number, "stopped for a decision")
+    if message:
+        tick.notify(message)
+
+
+def issue_link(number: int) -> str:
+    return f"https://github.com/{REPO}/issues/{number}"
+
+
+def heal_state(tick: Tick, number: int) -> dict[str, Any]:
+    """The heal runs started for an issue and whether the owner was told; missing means 0."""
+    try:
+        data = json.loads((tick.home / "heals" / str(number)).read_text())
+    except (OSError, ValueError):
+        data = {}
+    data = data if isinstance(data, dict) else {}
+    try:
+        count = int(data.get("count") or 0)
+    except (TypeError, ValueError):
+        count = 0
+    return {"count": count, "told": bool(data.get("told"))}
+
+
+def write_heal_state(tick: Tick, number: int, state: dict[str, Any]) -> None:
+    folder = tick.home / "heals"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / str(number)).write_text(json.dumps(state, sort_keys=True))
+
+
+def comment_lines(comment: dict[str, Any]) -> list[str]:
+    return [line.strip() for line in str(comment.get("body") or "").strip().splitlines()]
+
+
+def comment_made(comment: dict[str, Any]) -> float | None:
+    try:
+        return datetime.fromisoformat(str(comment.get("createdAt") or "")).timestamp()
+    except ValueError:
+        return None
+
+
+def issue_comments(tick: Tick, number: int) -> list[dict[str, Any]]:
+    try:
+        data = tick.gh_json("issue", "view", str(number), "--json", "comments")
+    except (RuntimeError, ValueError):
+        return []
+    found = data.get("comments") if isinstance(data, dict) else None
+    return [c for c in found if isinstance(c, dict)] if isinstance(found, list) else []
+
+
+def owner_heal_counts(tick: Tick, number: int, comments: list[dict[str, Any]]) -> bool:
+    """AC2: the newest heal comment hands the issue to the owner and no build started since."""
+    newest: tuple[float, bool] | None = None
+    for comment in comments:
+        lines = comment_lines(comment)
+        made = comment_made(comment)
+        if lines[:2] != [MARKER, HEAL_MARKER] or made is None:
+            continue
+        if newest is None or made >= newest[0]:
+            newest = (made, lines[2:3] == [NEEDS_OWNER_MARKER])
+    return newest is not None and newest[1] and newest[0] > last_start(tick, number)
+
+
+def stop_message(tick: Tick, number: int, what: str) -> str:
+    """AC7: the loop heals it next, unless the heals are spent or a heal asked for the owner."""
+    if owner_heal_counts(tick, number, issue_comments(tick, number)):
+        return f"{NAME} #{number} cannot be healed, needs you: {issue_link(number)}"
+    state = heal_state(tick, number)
+    if state["count"] >= HEALS:
+        return heals_spent(tick, number, state)
+    return f"{NAME} #{number} {what}; the loop heals it next: {issue_link(number)}"
+
+
+def heals_spent(tick: Tick, number: int, state: dict[str, Any]) -> str:
+    """AC5: the message after the third heal, once until the owner restarts the issue."""
+    if state["told"]:
+        return ""
+    write_heal_state(tick, number, state | {"told": True})
+    return f"{NAME} #{number} failed after {HEALS} heals, needs you: {issue_link(number)}"
+
+
+def heal_needs_owner(tick: Tick, run: Path, number: int) -> bool:
+    """AC6: this heal run's own comment hands the issue to the owner."""
+    began = run_began(run)
+    data = tick.gh_json("issue", "view", str(number), "--json", "comments")  # an error: next tick
+    for comment in data.get("comments") or []:
+        made = comment_made(comment)
+        lines = comment_lines(comment)
+        if lines[:3] == [MARKER, HEAL_MARKER, NEEDS_OWNER_MARKER] and made and made > began:
+            return True
+    return False
+
+
+def heal_failed(tick: Tick, number: int, reason: str) -> None:
+    """AC4: a failed heal keeps the record's kind and retries; only the outcome changes."""
+    old = failed_record(tick, number)
+    if old is None:
+        old = {"main": main_head(tick), "kind": "stopped", "retries": 0}
+    write_record(tick, number, old | {"outcome": reason})
+
+
+def heal_end(
+    tick: Tick, run: Path, number: int, worktree: Path, labels: set[str], reason: str, limit: bool
+) -> None:
+    """AC4, AC6: how a heal run ended; it never opens a pull request."""
+    key = run.name
+    lost = not labels & {"agent:running", "agent:ready", "agent:failed"}  # never left unlabelled
+    if "agent:running" in labels or lost:
+        if limit:
+            pause_for_limit(tick, key, str(number), worktree, heal=True)
+            return
+        mark_failed(tick, str(number), reason, log_tail(run))
+        tick.say(f"{key}: heal {reason}; agent:failed, worktree kept")
+        heal_failed(tick, number, reason)
+        tick.notify(f"{NAME} build for issue #{number} failed: {reason}")
+        return
+    remove_worktree(tick, worktree)
+    if "agent:failed" not in labels:
+        tick.say(f"{key}: heal ended, the issue is ready again")
+        return
+    if heal_needs_owner(tick, run, number):
+        old = failed_record(tick, number) or {"main": main_head(tick), "retries": 0}
+        write_record(
+            tick, number, old | {"kind": "decision", "outcome": "the heal needs the owner"}
+        )
+        tick.say(f"{key}: the heal needs the owner")
+        tick.notify(f"{NAME} #{number} cannot be healed, needs you: {issue_link(number)}")
+        return
+    heal_failed(tick, number, "set agent:failed itself")
+    tick.say(f"{key}: heal set agent:failed itself")
+    tick.notify(f"{NAME} build for issue #{number} failed: set agent:failed itself")
+
+
+def mark_failed(tick: Tick, number: str, reason: str, tail: str) -> None:
+    """The failed-build label and comment, with the end of the log."""
+    ensure_label(tick, "agent:failed")
+    tick.gh(
+        "issue",
+        "edit",
+        number,
+        "--add-label",
+        "agent:failed",
+        "--remove-label",
+        "agent:running,agent:ready",
+    )
+    body = f"{MARKER}\nThe loop build {reason}."
+    body += f" Last {LOG_TAIL} lines of the log:\n"
+    body += f"\n```\n{tail}\n```"
+    tick.gh("issue", "comment", number, "--body", body)
 
 
 def plan_posted(tick: Tick, key: str, number: int, worktree: Path) -> None:
@@ -608,6 +762,9 @@ def handle_end(tick: Tick, run: Path, outcome: str, prs: list[dict[str, Any]]) -
         tick.notify(f"{NAME} build for pull request #{number} {reason}")
         return
     labels = names(tick.gh_json("issue", "view", number, "--json", "labels"))
+    if (run / HEAL_FLAG).exists():
+        heal_end(tick, run, int(number), worktree, labels, reason, limit)
+        return
     has_pr = any(closes(pr) == int(number) for pr in prs)
     opened = newest_open_pr(prs, int(number))
     if "agent:running" not in labels and not has_pr and PLAN_REVIEW in labels:
@@ -632,20 +789,7 @@ def handle_end(tick: Tick, run: Path, outcome: str, prs: list[dict[str, Any]]) -
         pause_for_limit(tick, key, number, worktree)
         return
     decision = outcome == "0" and needs_decision(tick, run, number)
-    ensure_label(tick, "agent:failed")
-    tick.gh(
-        "issue",
-        "edit",
-        number,
-        "--add-label",
-        "agent:failed",
-        "--remove-label",
-        "agent:running,agent:ready",
-    )
-    body = f"{MARKER}\nThe loop build {reason}."
-    body += f" Last {LOG_TAIL} lines of the log:\n"
-    body += f"\n```\n{tail}\n```"
-    tick.gh("issue", "comment", number, "--body", body)
+    mark_failed(tick, number, reason, tail)
     tick.say(f"{key}: {reason}; agent:failed, worktree kept")
     if decision:
         decision_stop(tick, int(number))
@@ -680,7 +824,7 @@ def main_head(tick: Tick) -> str:
     return tick.main_head
 
 
-def record_failure(tick: Tick, number: int, kind: str, outcome: str) -> None:
+def record_failure(tick: Tick, number: int, kind: str, outcome: str, notify: bool = True) -> None:
     """#149 AC1, AC4: what failed and on which main; retries are kept from the last record."""
     old = failed_record(tick, number) or {}
     retries = int(old.get("retries") or 0)
@@ -689,11 +833,10 @@ def record_failure(tick: Tick, number: int, kind: str, outcome: str) -> None:
     if stacked is not None and stacked.get("head"):
         record["parent"] = stacked["head"]
     if retries >= RETRIES:
-        if not old.get("told"):
-            tick.notify(
-                f"{NAME} #{number} failed after {RETRIES} retries, needs you: "
-                f"https://github.com/{REPO}/issues/{number}"
-            )
+        if notify and not old.get("told"):  # a decision stop sends its own message
+            message = stop_message(tick, number, f"failed after {RETRIES} retries")
+            if message:
+                tick.notify(message)
         record["told"] = True
     write_record(tick, number, record)
 
@@ -741,6 +884,41 @@ def tidy_failed(tick: Tick) -> None:
         tick.say(f"issue-{number}: {why}, failure record archived")
 
 
+def failed_times(tick: Tick) -> dict[int, float]:
+    """AC1: the failure records that exist when the tick begins, with their modification times."""
+    folder = tick.home / "failed"
+    found: dict[int, float] = {}
+    if folder.exists():
+        for path in folder.iterdir():
+            if path.name.isdigit() and path.is_file():
+                found[int(path.name)] = path.stat().st_mtime
+    return found
+
+
+def tidy_heals(tick: Tick) -> None:
+    """AC5, AC8: a heal count leaves when its issue closes; the owner's restart resets `told`."""
+    folder = tick.home / "heals"
+    if not folder.exists():
+        return
+    by_number = {item["number"]: item for item in open_issue_list(tick)}
+    for path in sorted(folder.iterdir()):
+        if not path.name.isdigit():
+            continue
+        number = int(path.name)
+        item = by_number.get(number)
+        if item is None:
+            archive = tick.home / "archive"
+            archive.mkdir(exist_ok=True)
+            path.rename(archive / f"heals-{number}-{int(tick.host.now())}")
+            tick.say(f"issue-{number}: closed, heal count archived")
+            continue
+        state = heal_state(tick, number)
+        restarted = state["count"] >= HEALS and state["told"] and "agent:ready" in names(item)
+        if restarted and labelled_by_owner(tick, number):
+            write_heal_state(tick, number, state | {"told": False})
+            tick.say(f"issue-{number}: restarted by the owner after {HEALS} heals")
+
+
 def retry_reason(tick: Tick, item: dict[str, Any], parent_pr: dict[str, Any] | None = None) -> str:
     """#149 AC2, #165 AC9: why a failed issue may start again, or empty when it may not."""
     number = item["number"]
@@ -772,9 +950,21 @@ def retry_reason(tick: Tick, item: dict[str, Any], parent_pr: dict[str, Any] | N
     return ""
 
 
-def pause_for_limit(tick: Tick, key: str, number: str, worktree: Path) -> None:
+def pause_for_limit(tick: Tick, key: str, number: str, worktree: Path, heal: bool = False) -> None:
     """#74 AC5: a build stopped by the plan limit before its hand-over; any exit code."""
-    if key.startswith("issue-"):
+    if heal:  # AC4: back to agent:failed, the record unchanged, the heal start not counted
+        tick.gh(
+            "issue",
+            "edit",
+            number,
+            "--add-label",
+            "agent:failed",
+            "--remove-label",
+            "agent:running",
+        )
+        state = heal_state(tick, int(number))
+        write_heal_state(tick, int(number), state | {"count": max(0, state["count"] - 1)})
+    elif key.startswith("issue-"):
         tick.gh(
             "issue", "edit", number, "--add-label", "agent:ready", "--remove-label", "agent:running"
         )
@@ -1075,7 +1265,7 @@ def labelled_by_owner(tick: Tick, number: int) -> bool:
 
 
 def depends_on(body: str) -> set[int]:
-    """Every #number on each line that starts with 'Depends on'."""
+    """Every #number after 'Depends on' anywhere in a line, up to the end of that line."""
     found: set[int] = set()
     for rest in DEPENDS_LINE.findall(body):
         found |= {int(n) for n in re.findall(r"#(\d+)", rest)}
@@ -1401,19 +1591,122 @@ def epic_prompt(start: EpicStart) -> str:
     )
 
 
-def self_fix_time(item: dict[str, Any]) -> float | None:
-    """When the newest self-fix comment of the issue was posted (fail-fix AC7), or None."""
+def marked_time(item: dict[str, Any], markers: set[str]) -> float | None:
+    """When the newest comment whose first lines are the marker and one of `markers` was posted."""
     newest: float | None = None
     for comment in item.get("comments") or []:
-        lines = str(comment.get("body") or "").strip().splitlines()
-        if [line.strip() for line in lines[:2]] != [MARKER, SELF_FIX_MARKER]:
+        lines = comment_lines(comment)
+        if lines[:1] != [MARKER] or lines[1:2] == [] or lines[1] not in markers:
             continue
-        try:
-            made = datetime.fromisoformat(str(comment.get("createdAt") or "")).timestamp()
-        except ValueError:
-            continue
-        newest = made if newest is None else max(newest, made)
+        made = comment_made(comment)
+        if made is not None:
+            newest = made if newest is None else max(newest, made)
     return newest
+
+
+def self_fix_time(item: dict[str, Any]) -> float | None:
+    """When the newest self-fix or heal comment was posted (fail-fix AC7, heal AC8), or None."""
+    return marked_time(item, {SELF_FIX_MARKER, HEAL_MARKER})
+
+
+def healed_since_start(tick: Tick, item: dict[str, Any]) -> bool:
+    """AC4: a heal comment newer than the issue's last build start."""
+    when = marked_time(item, {HEAL_MARKER})
+    return when is not None and when > last_start(tick, item["number"])
+
+
+@dataclass(frozen=True)
+class Hold:
+    """What keeps an issue waiting: unmet dependencies, its epic start and its stack parent."""
+
+    waiting: set[int]
+    epic: dict[str, Any] | None
+    on_epic: EpicStart | None
+    parent_pr: dict[str, Any] | None
+    held: bool
+
+
+def hold_of(
+    tick: Tick, prs: list[dict[str, Any]], issue: dict[str, Any], open_numbers: set[int]
+) -> Hold:
+    waiting = unmet(tick, depends_on(issue.get("body") or ""), open_numbers)
+    epic = epic_of(tick, issue)
+    on_epic = epic_start(tick, prs, epic, waiting) if epic is not None else None
+    parent_pr = (
+        stack_parent(tick, prs, next(iter(waiting)), open_numbers)
+        if len(waiting) == 1 and epic is None
+        else None
+    )
+    held = bool(on_epic.waits) if on_epic is not None else bool(waiting) and parent_pr is None
+    return Hold(waiting, epic, on_epic, parent_pr, held)
+
+
+def heal_kind(record: dict[str, Any] | None) -> bool:
+    """AC1: a decision or stopped failure, or a transient one after the last retry."""
+    if record is None:
+        return False
+    kind = record.get("kind")
+    try:
+        retries = int(record.get("retries") or 0)
+    except (TypeError, ValueError):
+        retries = 0
+    return kind in {"decision", "stopped"} or (kind == "transient" and retries >= RETRIES)
+
+
+def heal_targets(
+    tick: Tick,
+    prs: list[dict[str, Any]],
+    running: dict[str, bool],
+    failed: list[dict[str, Any]],
+    holds: dict[int, Hold],
+    reasons: dict[int, str],
+    free: int,
+    open_numbers: set[int],
+) -> list[Target]:
+    """AC1 to AC5: heal runs for failed issues no retry can help, oldest failure record first."""
+    candidates: list[dict[str, Any]] = []
+    for item in failed:
+        number = item["number"]
+        labels = names(item)
+        if f"issue-{number}" in running or "agent:ready" in labels:
+            continue
+        if labels & (SKIP_LABELS - {"agent:failed"}) or member_of(tick, item) is not None:
+            continue
+        hold = holds.setdefault(number, hold_of(tick, prs, item, open_numbers))
+        reasons[number] = retry_reason(tick, item, hold.parent_pr)
+        if reasons[number] or number not in tick.failed_at_start:
+            continue
+        if heal_kind(failed_record(tick, number)):
+            candidates.append(item)
+    candidates.sort(key=lambda i: (tick.failed_at_start[i["number"]], i["number"]))
+    chosen: list[Target] = []
+    for item in candidates:
+        number = item["number"]
+        if owner_heal_counts(tick, number, item.get("comments") or []):
+            continue
+        state = heal_state(tick, number)
+        if state["count"] >= HEALS:
+            message = heals_spent(tick, number, state)
+            if message:
+                tick.say(f"issue-{number}: failed after {HEALS} heals; the owner is told")
+                tick.notify(message)
+            continue
+        if len(chosen) >= free:
+            continue
+        if not labelled_by_owner(tick, number):
+            tick.say(f"issue-{number}: agent:ready was not added by {OWNER}; no heal")
+            continue
+        prompt = f"Use the work-queue skill for issue #{number} only: heal."
+        chosen.append(
+            Target(
+                f"issue-{number}",
+                number,
+                prompt + pinned_line(tick, item),
+                message=f"{NAME} healing #{number} ({state['count'] + 1} of {HEALS})",
+                heal=True,
+            )
+        )
+    return chosen
 
 
 def last_start(tick: Tick, number: int) -> float:
@@ -1512,32 +1805,33 @@ def choose(tick: Tick, prs: list[dict[str, Any]], running: dict[str, bool]) -> l
         (i for i in issues if "agent:failed" in names(i)),
         key=lambda i: (i["createdAt"], i["number"]),
     )
+    holds: dict[int, Hold] = {}
+    reasons: dict[int, str] = {}
+    healing = heal_targets(
+        tick, prs, running, failed, holds, reasons, free - len(chosen), open_numbers
+    )
+    chosen += healing
+    healed = {target.number for target in healing}
     for issue in [*ready, *failed]:
         if len(chosen) >= free:
             break
         key = f"issue-{issue['number']}"
+        if issue["number"] in healed:
+            continue
         found = member_of(tick, issue) if considered(issue, key, running) else None
         if found is not None:
             tick.say(f"{key}: assigned to {member_text(found)}; skipped")
             continue
-        depends = depends_on(issue.get("body") or "")
         retry = ""
-        waiting = unmet(tick, depends, open_numbers)
-        epic = epic_of(tick, issue)
-        on_epic = epic_start(tick, prs, epic, waiting) if epic is not None else None
-        parent_pr = (
-            stack_parent(tick, prs, next(iter(waiting)), open_numbers)
-            if len(waiting) == 1 and epic is None
-            else None
-        )
-        if on_epic is not None:
-            held = bool(on_epic.waits)
-        else:
-            held = bool(waiting) and parent_pr is None
+        hold = holds.get(issue["number"]) or hold_of(tick, prs, issue, open_numbers)
+        waiting, on_epic, parent_pr, held = hold.waiting, hold.on_epic, hold.parent_pr, hold.held
         if "agent:failed" in names(issue) and "agent:ready" not in names(issue):
             if key in running or held:
                 continue
-            retry = retry_reason(tick, issue, parent_pr)
+            if issue["number"] in reasons:
+                retry = reasons[issue["number"]]
+            else:
+                retry = retry_reason(tick, issue, parent_pr)
             if not retry:
                 continue
         elif key in running or names(issue) & SKIP_LABELS or held:
@@ -1600,6 +1894,7 @@ def choose(tick: Tick, prs: list[dict[str, Any]], running: dict[str, bool]) -> l
                     retry=retry,
                     test_edits=test_edits_of(issue.get("body") or ""),
                     allowed_edits=allowed_edits_of(issue.get("body") or ""),
+                    archive_old=healed_since_start(tick, issue),
                     **stack,
                 )
             )
@@ -1613,6 +1908,7 @@ def choose(tick: Tick, prs: list[dict[str, Any]], running: dict[str, bool]) -> l
                 retry=retry,
                 test_edits=test_edits_of(issue.get("body") or ""),
                 allowed_edits=allowed_edits_of(issue.get("body") or ""),
+                archive_old=healed_since_start(tick, issue),
                 **stack,
             )
         )
@@ -1630,8 +1926,9 @@ def start(tick: Tick, target: Target) -> bool:
     if worktree.exists():
         aside = worktree.with_name(f"{target.key}-{int(tick.host.now())}")
         tick.host.run([*git, "worktree", "move", str(worktree), str(aside)])
-        archive_branches(tick, target, aside)
-    elif target.retry:
+        if not target.heal:  # AC4: a heal run archives no branch and creates none
+            archive_branches(tick, target, aside)
+    elif target.retry or target.archive_old:
         archive_branches(tick, target, None)
     wanted = [b for b in (target.branch, target.stack_branch) if b]
     tick.host.run([*git, "fetch", "origin", "main", *wanted])
@@ -1664,7 +1961,8 @@ def start(tick: Tick, target: Target) -> bool:
         write_round(tick, worktree, lab, target.number, target.ui)
     if target.key.startswith("issue-"):
         stacked = tick.home / "stacked" / str(target.number)
-        if target.stack_branch:
+        # A heal keeps the stacked record of the failed build for its retry reason.
+        if not target.heal and target.stack_branch:
             stacked.parent.mkdir(parents=True, exist_ok=True)
             info: dict[str, Any] = {
                 "pr": target.stack_pr,
@@ -1672,10 +1970,12 @@ def start(tick: Tick, target: Target) -> bool:
                 "head": target.stack_head,
             }
             stacked.write_text(json.dumps(info, sort_keys=True))
-        else:
+        elif not target.heal:
             stacked.unlink(missing_ok=True)
         ensure_label(tick, "agent:running")
         remove = "agent:ready,agent:failed" if target.retry else "agent:ready"
+        if target.heal:
+            remove = "agent:failed"
         tick.gh(
             "issue",
             "edit",
@@ -1704,6 +2004,12 @@ def start(tick: Tick, target: Target) -> bool:
     run.mkdir(parents=True, exist_ok=True)
     if target.alone:
         (run / "alone").touch()
+    if target.heal:  # AC4: the count goes up before the run starts
+        state = heal_state(tick, target.number)
+        write_heal_state(tick, target.number, state | {"count": state["count"] + 1})
+        (run / HEAL_FLAG).touch()
+    else:
+        (run / HEAL_FLAG).unlink(missing_ok=True)
     edits = run / TEST_EDITS_FILE
     if target.test_edits:
         edits.write_text("\n".join(target.test_edits) + "\n")
@@ -2763,8 +3069,10 @@ def tick_once(host: Host, home: Path) -> list[str]:
         prs = loop_pull_requests(tick)
         sync_review(tick, prs, tidy_ready(tick))
         announce_merged(tick, prs)
+        tick.failed_at_start = failed_times(tick)
         finish_runs(tick, prs)
         tidy_failed(tick)
+        tidy_heals(tick)
         needs_you(tick, prs)
         running = running_keys(tick)
         tell_unfinished_epic_reviews(tick, prs, running)

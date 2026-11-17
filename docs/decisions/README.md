@@ -41,3 +41,4 @@ One file per decision: `ADR-001-short-title.md`, numbered in order. Write one fo
 - [ADR-031: Every release passes three automatic security checks and a Claude security review before it reaches end users](ADR-031-security-check-before-release.md)
 - [ADR-032: Every release is checked on the live site and can be rolled back with one command; the loop watches uptime, Sentry gets errors, Checks scan accessibility](ADR-032-post-release-checks.md)
 - [ADR-033: A card tap in a cloud thread approves the GitHub writes the thread hands to the Mac mini](ADR-033-card-tap-approves-mac-mini-writes.md)
+- [ADR-034: Dependencies are read anywhere; the next tick heals a failed issue](ADR-034-depends-and-heal.md)

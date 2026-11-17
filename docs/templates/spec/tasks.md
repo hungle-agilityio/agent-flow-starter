@@ -8,6 +8,7 @@
      The tick reads it: an issue waits while a running or in-review issue lists the same file, and an issue with no paths runs alone (ADR-015).
      In an epic, a task that changes a number or behaviour set by an earlier task names it in its ACs; it may change that task's tests, and the epic pull request lists them (ADR-022).
      Each task of a full-lane spec lists its decisions file docs/specs/<feature>/decisions/T<k>.md (NEW): its build writes there every decision it takes, or "No decision beyond the issue." (ADR-027).
+     Every task of an epic has its own line `Depends on #<n>.` (or `Depends on: none`) directly under `Part of the epic #N` in its issue body. The issues of an epic are created in dependency order, base tasks first. `route_issue.py` of the create-issue skill must exit 0 before an issue is posted: it prints the dependencies it read and refuses an unreadable `Depends on` line.
      A task with needs-ui: yes also gets a `## Screens to capture` section in its issue body: one fenced `json` block, a check-in-browser spec in which every step has `goto` and `capture`, for example:
        ## Screens to capture
        ```json

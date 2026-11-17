@@ -21,7 +21,7 @@ def test_every_cited_decision_record_is_here() -> None:
     cited = {number for text in texts for number in CITED.findall(text)}
     present = {p.name[4:7] for p in DECISIONS.glob("ADR-*.md")}
     assert cited - present == set()
-    assert {f"{n:03d}" for n in range(8, 34)} <= present
+    assert {f"{n:03d}" for n in range(8, 35)} <= present
 
 
 def test_the_decisions_index_lists_exactly_the_files() -> None:

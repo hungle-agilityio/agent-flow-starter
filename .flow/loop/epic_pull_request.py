@@ -43,6 +43,8 @@ REVIEW_CHECKLIST = (
 )
 QUEUE_MARKER = "<!-- work-queue -->"
 SELF_FIX_MARKER = "<!-- self-fix -->"
+HEAL_MARKER = "<!-- heal -->"
+NEEDS_OWNER_MARKER = "<!-- needs-owner -->"
 
 
 @functools.cache
@@ -170,11 +172,12 @@ def lists_guard_files(body: str) -> bool:
 
 
 def self_fix_urls(comments: Sequence[dict[str, Any]]) -> list[str]:
-    """The links of the comments whose first lines are the work-queue and self-fix markers."""
+    """Self-fix comments, and heal comments that did not hand the issue to the owner."""
     found: list[str] = []
     for comment in comments:
-        lines = str(comment.get("body") or "").strip().splitlines()
-        if [line.strip() for line in lines[:2]] == [QUEUE_MARKER, SELF_FIX_MARKER]:
+        lines = [line.strip() for line in str(comment.get("body") or "").strip().splitlines()]
+        heal = lines[:2] == [QUEUE_MARKER, HEAL_MARKER] and lines[2:3] != [NEEDS_OWNER_MARKER]
+        if lines[:2] == [QUEUE_MARKER, SELF_FIX_MARKER] or heal:
             found.append(str(comment.get("url") or ""))
     return found
 

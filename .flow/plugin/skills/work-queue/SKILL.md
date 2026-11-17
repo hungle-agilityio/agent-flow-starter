@@ -22,10 +22,11 @@ That stop adds and removes no label and posts nothing on GitHub. In an interacti
 When the prompt names one issue or one pull request, work on that one only; the tick has already picked it, claimed it and checked the cap (ADR-014).
 
 - **Pull request #N:** section 1 for that pull request only, then end. The current folder is a worktree on its branch.
-- **Issue #N:** section 2 from step 3 (Analyse) on, for that issue only, then end. The current folder is a worktree detached at `origin/main`: first create the branch there, `git switch -c <kind>/<N>-<short-description>` (`rules/git.md`). Do not pick, claim or look at other issues.
+- **Issue #N:** section 2 for that issue only: first the **Dependencies.** check of step 2, before any branch exists, then from step 3 (Analyse) on, then end. The current folder is a worktree detached at `origin/main`: when the check lets the build go on, create the branch there, `git switch -c <kind>/<N>-<short-description>` (`rules/git.md`); a release leaves no branch behind. Do not pick or claim other issues; read only the issues and the pull request the **Dependencies.** check names.
 - **Stacked issue (ADR-018):** when the prompt also says `Stacked on pull request #Q: branch from origin/<branch> and open the pull request into <branch>.`, the worktree is detached at the parent branch instead of `origin/main`. Create the branch there the same way (`git switch -c`, not from `origin/main`), open the pull request with `gh pr create --base <branch>`, and put the line `Stacked on #<Q> (merge that one first).` just above `Closes #N` in the body. Every other step is unchanged. Without that prompt line the base is `main`, as always.
 - **Epic issue (ADR-022):** when the prompt says `Task of epic branch epic/<N>-<slug>: branch from origin/epic/<N>-<slug> and open a normal pull request into epic/<N>-<slug> (not a draft, no `Stacked on` line).`, the worktree is detached at `origin/epic/<N>-<slug>`, the epic's shared branch. Create the branch there with `git switch -c` as above and open a normal pull request with `gh pr create --base epic/<N>-<slug>`: not a draft, and with no `Stacked on` line. The tick merges it into the epic branch once it is green, ready and has its verify report. Never push to the epic branch from an issue build.
 - **Epic review:** when the prompt is `Use the work-queue skill for pull request #<N> only: epic review.`, run the section `## Epic review` for that pull request only, then end; section 1 is not run. The current folder is a worktree on the epic branch.
+- **Heal:** when the prompt is `Use the work-queue skill for issue #<n> only: heal.`, run the section `## Heal` for that issue only, then end; section 2 is not run. The current folder is a worktree detached at `origin/main`; create no branch.
 - Every other rule holds: the status labels, waiting for CI up to 15 minutes, two CI fix attempts per round, and "no link, no pull request" (step 10).
 - No target in the prompt (an interactive "work the queue"): the whole skill as written, starting on `main`.
 
@@ -90,12 +91,42 @@ One high-effort review of a whole epic before the owner reads it. It applies whe
 5. **Comment.** Post one comment on pull request #N whose first line is `<!-- work-queue -->`, second line `<!-- epic-review -->`, then `## Epic review`, the level line `Level: high`, and the table `| Finding | File | Result |` with one line per finding, or the line `No findings.` instead of the table.
 6. **CI.** The run then waits for CI and sets the status label as in "After a push" (Status labels).
 
+## Heal
+
+A short run that puts a failed issue back on its way without the owner. It applies when the prompt is `Use the work-queue skill for issue #<n> only: heal.`; section 2 is not run. The tick starts it for an issue labelled `agent:failed` that no retry can help (a `needs-decision` stop, a plain stop, or a failure after the last retry), at most 3 times per issue. The heal run edits the issue, never the code.
+
+1. **Read.** The issue body; every comment of the issue whose first line is `<!-- work-queue -->` (the stop comments, the failed-build comments, earlier heals and self-fixes); the spec linked from the issue; the comments titled `Decisions` and `Design`; and the other issues of its epic, when it has an epic line.
+2. **Choose.** Take the option the newest stop comment recommends; else the narrowest reading that meets every AC; else the recommended option in the spec. A requirement the owner settled stays as it is.
+3. **Edit the issue body only**: the ACs, `## Files likely touched`, `## Existing tests that change`, the `Depends on` lines and the test matrix rows, with `gh issue edit <n> --body-file <file>` (the file under `out/`, which is git-ignored). When the prompt has the line `Pinned tests not listed: ...`, settle each of those tests in the body before going on: list it under `## Existing tests that change` with old → new, or reword the AC so the test stays unchanged.
+4. **Comment.** Post one comment whose first line is `<!-- work-queue -->`, second line `<!-- heal -->`, then a `## Decisions` table: what stopped, what changed, why.
+5. **Hand back.** Set `agent:ready` and remove `agent:running` (`gh issue edit <n> --add-label agent:ready --remove-label agent:running`), and end without a pull request. The tick starts the build again before the other ready issues.
+
+The heal run writes no file in the repository (the body file goes under the git-ignored `out/`), commits nothing and pushes nothing.
+
+**Never in a heal run:**
+
+- delete files or data;
+- a migration or any change to stored data;
+- anything about security, secrets, permissions or sign-in;
+- a setting or file that turns a guard off, or a file under `.claude/` added to the issue;
+- delete, skip or weaken a test beyond the new number an AC needs;
+- accept a query count that grows with the data.
+
+When the only way forward is one of these, post one comment whose first line is `<!-- work-queue -->`, second line `<!-- heal -->`, third line `<!-- needs-owner -->`, then the reason and the choices for the owner; set `agent:failed`, remove `agent:running` (`gh issue edit <n> --add-label agent:failed --remove-label agent:running`), and end. The tick then tells the owner and starts no other heal until the owner restarts the issue.
+
 ## 2. One new issue
 
 1. **Pick.** `gh issue list --label agent:ready --state open`, oldest first. Skip `agent:running`, `agent:review`, `agent:failed`, and any issue with `Depends on #M` while #M is still open. Stop here if the loop's open pull requests plus `agent:running` issues reach 3 (ADR-012). Nothing to pick: section 3.
-2. **Claim.** Label `agent:running` (`gh label create` it first if missing). Branch `<kind>/<id>-<short-description>` from `origin/main` (`rules/git.md`).
+2. **Claim.** Label `agent:running` (`gh label create` it first if missing). After the **Dependencies.** check below lets the build go on, branch `<kind>/<id>-<short-description>` from `origin/main` (`rules/git.md`).
+
+   **Dependencies.** Before step 3 and before the branch is created, check every issue number named after `Depends on` in the issue body (anywhere in a line). A dependency is met when that issue is closed, unless it was closed as not planned (any other close reason, or one that cannot be read, counts as met, as the tick's `unmet()` reads it); or, when the issue has an epic line (`Part of the epic` and the epic number, an epic task), when that issue has the label `agent:in-epic`; or, when the prompt says `Stacked on pull request #Q`, when pull request #Q closes that issue. An issue closed as not planned is not met, even with `agent:in-epic` or a stacked pull request. When any dependency is not met, the build writes no code and:
+   - adds one line `Depends on #M.` per unmet issue under the epic line (or under the last line of the Summary when there is no epic line) with `gh issue edit <n> --body-file out/issue-body.md` (`out/` is git-ignored, so the worktree stays clean and the tick can remove it), only when no line of the body starts with `Depends on` and names that issue;
+   - posts one comment whose first line is `<!-- work-queue -->`, second line `<!-- waiting -->`, then one line per unmet issue: `Waiting for #M: not closed.` (outside an epic, still open), `Waiting for #M: not in the epic branch yet.` (an epic task, #M not closed and without `agent:in-epic`), or `Waiting for #M: closed as not planned.`;
+   - sets `agent:ready` and removes `agent:running` (`gh issue edit <n> --add-label agent:ready --remove-label agent:running`), and ends the run without a pull request and without `agent:failed`.
+
+   This release never counts as a stop, a self-fix or a failure: no `needs-decision` comment, no self-fix comment, no `agent:failed`. The tick starts the issue again once its dependencies are met.
 3. **Analyse.** `analyst`: evidence first, difficulty. Its questions are not sent to the user.
-4. **Decide.** First read what the owner settled: the issue body (its "Done when" items are `AC1..ACn`) and the owner's comments titled `Decisions` and `Design`. Those are final. For each `grill-me` question still open, take the recommended option. Keep one `Decisions` table: question, chosen, rejected, why, from the user or from you. A requirement is never changed: on a conflict take the narrowest reading and list it. When no reading satisfies every AC (two ACs contradict each other, an AC needs a change outside what the issue allows, or a decision the issue leaves to the owner is missing), stop the run without a pull request: label `agent:failed` and post one comment whose first line is `<!-- work-queue -->` and second line `<!-- needs-decision -->`, then the reason and the choices for the owner. The tick never retries such a stop on its own; the owner restarts it by adding `agent:ready` again. A `Design` link and each step's `"design"` state of the app prototype are the UI to build; the verify report shows each design next to the built screen (Design vs build). A difference is reported in the pull request, never fixed by changing the prototype.
+4. **Decide.** First read what the owner settled: the issue body (its "Done when" items are `AC1..ACn`) and the owner's comments titled `Decisions` and `Design`. Those are final. For each `grill-me` question still open, take the recommended option. Keep one `Decisions` table: question, chosen, rejected, why, from the user or from you. A requirement is never changed: on a conflict take the narrowest reading and list it. When no reading satisfies every AC (two ACs contradict each other, an AC needs a change outside what the issue allows, or a decision the issue leaves to the owner is missing), stop the run without a pull request: label `agent:failed` and post one comment whose first line is `<!-- work-queue -->` and second line `<!-- needs-decision -->`, then the reason and the choices for the owner. The next tick heals such a stop (`## Heal`) up to 3 times; after that it goes to the owner, who restarts it by adding `agent:ready` again. A `Design` link and each step's `"design"` state of the app prototype are the UI to build; the verify report shows each design next to the built screen (Design vs build). A difference is reported in the pull request, never fixed by changing the prototype.
 
    **Self-fix.** Before such a stop, check whether the only reason is technical. Technical means only:
    - an existing test pins a fixed number or a literal that an AC changes: add the test under `## Existing tests that change` with old → new;

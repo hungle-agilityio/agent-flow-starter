@@ -10,6 +10,9 @@ by FLOW_CONFIG). The folder prefix stripped from each path is its `project.app_d
 prefix. The flow folders are its `paths.flow_dirs` and `paths.plugin_dir`. A path under a
 .claude folder gets a warning on stderr: Claude Code's safetyCheck stops `claude -p` from
 editing it, so that issue is built by hand with no agent:* label (ADR-023, "Exception: .claude/").
+It also reads the `Depends on` lines and prints `Depends on: #107, #108` (or `none`) on stderr last.
+A `Depends on` line with no #N and no `none`, or a `Part of the epic #N` line with no `Depends on`
+line, is refused with NOT ROUTED.
 """
 
 from __future__ import annotations
@@ -32,6 +35,11 @@ FLOW_FOLDERS = ("ops/", ".claude/", ".github/", "specs/", "docs/learning/")
 PLUGIN_FOLDERS = ("../plugins/", "plugins/")
 SECTION = re.compile(r"^##\s+Files likely touched\s*$(.*?)(?=^##\s|\Z)", re.M | re.S)
 BULLET_PATH = re.compile(r"^\s*[-*]\s+`([^`]+)`(.*)$", re.M)
+DEPENDS_LINE = re.compile(r"\bDepends on\b", re.I)
+EPIC_LINE = re.compile(r"Part of the epic #\d+")
+ISSUE_NUMBER = re.compile(r"#(\d+)")
+NONE_WORD = re.compile(r"\bnone\b", re.I)
+DEPENDS_HELP = "write the line `Depends on #<n>.` or the line `Depends on: none`"
 
 
 def load_module(name: str, path: Path) -> ModuleType:
@@ -114,6 +122,29 @@ def route(text: str, allow: list[str] | None = None) -> list[str]:
     return ["area:flow" if flow else "area:app", "agent:ready"]
 
 
+def depends_on(text: str) -> list[str]:
+    """The issue numbers after `Depends on`, once each in body order; refuse an unreadable line."""
+    numbers: list[str] = []
+    found = epic = False
+    for line in text.splitlines():
+        epic = epic or EPIC_LINE.search(line) is not None
+        match = DEPENDS_LINE.search(line)
+        if match is None:
+            continue
+        found = True
+        after = line[match.end() :]
+        listed = ISSUE_NUMBER.findall(after)
+        if not listed and NONE_WORD.search(after) is None:
+            raise ValueError(
+                f"the line '{line.strip()}' holds Depends on but no #<n> and no 'none'; "
+                f"{DEPENDS_HELP}"
+            )
+        numbers.extend(listed)
+    if epic and not found:
+        raise ValueError(f"an epic task has no Depends on line; {DEPENDS_HELP}")
+    return list(dict.fromkeys(numbers))
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else "")
     parser.add_argument("issue", type=Path)
@@ -121,12 +152,17 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     text = args.issue.read_text()
     try:
-        print(" ".join(route(text)))
-        for path in claude_folder_paths(paths_of(text)):
-            print(CLAUDE_WARNING.format(path=path), file=sys.stderr)
+        labels = route(text)
+        claude_paths = claude_folder_paths(paths_of(text))
+        dependencies = depends_on(text)
     except ValueError as error:
         print(f"NOT ROUTED: {error}")
         return 1
+    print(" ".join(labels))
+    for path in claude_paths:
+        print(CLAUDE_WARNING.format(path=path), file=sys.stderr)
+    listed = ", ".join(f"#{number}" for number in dependencies) or "none"
+    print(f"Depends on: {listed}", file=sys.stderr)
     return 0
 
 
